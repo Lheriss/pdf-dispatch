@@ -1,0 +1,114 @@
+name: Build, test & publish
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r splitter/requirements.txt
+
+      - name: Security audit (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit -r splitter/requirements.txt --ignore-vuln PYSEC-2025-49
+        continue-on-error: false
+
+      - name: Python syntax check
+        run: python3 -c "import ast; ast.parse(open('splitter/app.py').read()); print('OK')"
+
+      - name: JS syntax check
+        run: node --check splitter/static/js/app.js && echo OK
+
+      - name: i18n key consistency
+        run: python3 tests/test_i18n_keys.py
+
+      - name: JS t() collision detector
+        run: python3 tests/test_js_t_collision.py
+
+      - name: Python core unit tests
+        run: python3 tests/test_python_core.py
+
+      - name: JS functional tests
+        run: node tests/test_js_functional.js
+
+      # ── Docker ───────────────────────────────────────────────────────────
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Docker requires image names to be lowercase.
+      # github.repository_owner may be mixed-case, so we normalise it.
+      #
+      # The secondary tag uses the short commit SHA rather than a manually
+      # maintained version number: it is the same source of truth as
+      # APP_VERSION (injected into the image via ARG GIT_SHA, exposed by
+      # /api/runtime). No separate file to keep in sync, and every build
+      # gets a unique, traceable tag.
+      - name: Normalise image name (lowercase owner)
+        id: image
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          VERSION="${GITHUB_SHA::8}"
+          echo "owner=${OWNER}" >> $GITHUB_OUTPUT
+          echo "name=ghcr.io/${OWNER}/pdf-dispatch" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Image: ghcr.io/${OWNER}/pdf-dispatch  Version: ${VERSION}"
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          # load: true — charge l'image dans le daemon Docker local quel que
+          # soit push. Indispensable pour le smoke test ci-dessous : sur les
+          # PRs (push=false, ex. Dependabot), l'image construite par Buildx ne
+          # vivait jusqu'ici que dans le cache BuildKit — `docker run` échouait
+          # instantanément (image introuvable, ni localement ni sur le
+          # registre). Supporté simultanément avec push (build une fois,
+          # exporte vers les deux destinations).
+          load: true
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test — container starts and healthz responds
+        run: |
+          docker run -d --name test-splitter \
+            -p 5000:5000 \
+            -e DATA_DIR=/data \
+            -e APP_VERSION="ci" \
+            ${{ steps.image.outputs.name }}:latest
+          sleep 15
+          curl -f http://localhost:5000/healthz
+          docker stop test-splitter

@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+{#
+  pdf-dispatch — single-page application
+  =========================================
+  Rendered by the index() route (app.py) via Flask/Jinja2. Only two values
+  are injected server-side:
+    - lang      : active language code ("fr" or "en"), used for <html lang>
+                  and window.LANG.
+    - i18n_json : complete translation dictionary for the active language
+                  (splitter/i18n/<lang>.json), injected into window.I18N and
+                  consumed by t('key', {...}) in static/js/app.js.
+  CSS (static/css/style.css) and JS (static/js/app.js) are static files
+  with no templating — all dynamic logic goes through /api/... calls from app.js.
+#}
+<html lang="{{ lang }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pdf-dispatch</title>
+<script>
+  window.I18N = {{ i18n_json | safe }};
+  window.LANG = "{{ lang }}";
+</script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<header>
+  <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="11" width="7" height="2"/><rect x="10" y="5" width="2" height="14"/><rect x="14" y="5" width="8" height="2"/><rect x="14" y="11" width="8" height="2"/><rect x="14" y="17" width="8" height="2"/></svg></div>
+  <h1 data-i18n="app.title">PDF-DISPATCH</h1>
+  <div class="sdot"><div class="dot" id="sdot"></div><span id="stext">actif</span></div>
+</header>
+
+<main>
+
+<!-- Stats + Upload zone side by side -->
+<div style="display:flex;gap:0;align-items:stretch;margin-bottom:24px">
+
+  <!-- Stats 2x2 compact -->
+  <div style="flex:1.3;display:flex;flex-direction:column">
+    <div class="section-title" style="margin-bottom:10px" data-i18n="stats.title">Statistiques</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:1;align-content:start">
+      <div class="card" style="padding:10px 14px">
+        <div class="clabel" data-i18n="stats.processed">Processed</div>
+        <div class="cvalue" style="font-size:18px;line-height:1.2" id="st-proc">–</div>
+      </div>
+      <div class="card" style="padding:10px 14px">
+        <div class="clabel" data-i18n="stats.produced">Produits</div>
+        <div class="cvalue" style="font-size:18px;line-height:1.2" id="st-docs">–</div>
+      </div>
+      <div class="card" style="padding:10px 14px">
+        <div class="clabel" data-i18n="stats.last_file">Dernier fichier</div>
+        <div class="cvalue" style="font-size:12px;line-height:1.3;word-break:break-all" id="st-last">–</div>
+      </div>
+      <div class="card" style="padding:10px 14px">
+        <div class="clabel" data-i18n="stats.errors">Erreurs</div>
+        <div class="cvalue" style="font-size:18px;line-height:1.2;color:var(--error)" id="st-err">–</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vertical separator -->
+  <div style="width:2px;background:var(--border);margin:22px 16px 0;border-radius:2px;flex-shrink:0"></div>
+
+  <!-- Upload zone -->
+  <div style="flex:1;display:flex;flex-direction:column">
+    <div class="section-title" style="margin-bottom:10px" data-i18n="upload.title">Drop zone</div>
+    <div class="upload-zone" id="upload-zone"
+      ondragover="uzDragOver(event)" ondragleave="uzDragLeave(event)" ondrop="uzDrop(event)"
+      onclick="document.getElementById('upload-input').click()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)">
+        <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 4v12M8 8l4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="uz-title" data-i18n="upload.drag_drop">Drag and drop your PDFs</span>
+      <span class="uz-sub" data-i18n="upload.or_click">ou cliquer pour parcourir</span>
+      <span class="uz-hint" data-i18n="upload.hint">→ traitement automatique</span>
+      <input type="file" id="upload-input" accept=".pdf" multiple style="display:none" onchange="uzFiles(this.files)">
+    </div>
+    <div class="upload-flash" id="upload-flash"></div>
+  </div>
+
+</div>
+
+<!-- Blocked email retrieval alert -->
+<div class="email-alert" id="email-alert">
+  <span>⛔</span>
+  <div>
+    <strong data-i18n="email.alert_blocked">Email retrieval blocked</strong> —
+    <span id="email-alert-reason"></span>
+  </div>
+</div>
+
+<!-- Queue -->
+<div class="queue-bar">
+  <span class="ql" data-i18n="queue.label">EN COURS ▸</span>
+  <span id="queue-content"><span class="qe" data-i18n="queue.empty">aucun fichier</span></span>
+</div>
+
+<!-- Settings -->
+<div class="settings">
+  <div class="settings-header" onclick="toggleSettings()">
+    <span data-i18n="settings.title">⚙ Configuration</span>
+    <span class="settings-arrow" id="sarrow">▼</span>
+  </div>
+  <div class="settings-body" id="sbody">
+
+    <!-- 1. Split triggers -->
+    <div class="sgroup" style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border)">
+      <div class="slabel" data-i18n="triggers.section_title">Split triggers</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px" data-i18n="triggers.hint">Click a trigger to show its options</div>
+      <div class="trigger-list" id="trigger-list"></div>
+      <div class="trigger-panel" id="trigger-panel">
+        <div class="trigger-panel-title">
+          <span><span data-i18n="triggers.panel_title_prefix">⚙ Configuration —</span> <span id="tp-title">–</span></span>
+          <button class="tp-edit-btn" onclick="toggleTriggerEdit()" data-i18n-title="triggers.edit_value_title" title="Edit trigger value">
+            <svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#f5a623" d="M5 3c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7H5V5h7V3H5m12.78 1a.69.69 0 0 0-.48.2l-1.22 1.21 2.5 2.5L19.8 6.7c.26-.26.26-.7 0-.96l-1.54-1.54a.68.68 0 0 0-.48-.2m-2.41 2.12L9 12.5V15h2.5l6.37-6.38-2.5-2.5Z"/></svg>
+          </button>
+        </div>
+        <div class="tp-edit-row" id="tp-edit-row">
+          <input type="text" id="tp-edit-input" data-i18n-placeholder="common.new_value_placeholder" placeholder="Nouvelle valeur…">
+          <button class="btn" onclick="applyTriggerEdit()" data-i18n="common.apply">Appliquer</button>
+          <button class="btn secondary" onclick="toggleTriggerEdit()" data-i18n="common.cancel">Annuler</button>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle"><input type="checkbox" id="tp-delete-page"><span class="toggle-slider"></span></label>
+          <span class="toggle-label" data-i18n="triggers.delete_page">Delete separator page</span>
+        </div>
+        <div style="color:var(--muted);font-size:10px;margin-top:2px;margin-bottom:10px" data-i18n="triggers.delete_page_help">
+          Enable this if the page carrying the code is a separate separator sheet that should not be included in the output document. Disable it if the code is printed on the document's own first page.
+        </div>
+        <div class="toggle-row">
+          <label class="toggle"><input type="checkbox" id="tp-case-sensitive"><span class="toggle-slider"></span></label>
+          <span class="toggle-label" data-i18n="triggers.case_sensitive">Case-sensitive</span>
+        </div>
+        <div style="color:var(--muted);font-size:10px;border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+          <strong style="color:var(--text)" data-i18n="triggers.glob_help_title">Supported glob patterns:</strong><br>
+          <code style="color:var(--accent2)">*</code> = <span data-i18n="triggers.glob_star">zero or more characters</span> &nbsp;
+          <code style="color:var(--accent2)">?</code> = <span data-i18n="triggers.glob_question">any single character</span> &nbsp;
+          <code style="color:var(--accent2)">[0-9]</code> = <span data-i18n="triggers.glob_digit">un chiffre</span> &nbsp;
+          <code style="color:var(--accent2)">[a-z]</code> = <span data-i18n="triggers.glob_letter">une lettre</span> &nbsp;
+          <code style="color:var(--accent2)">[!abc]</code> = <span data-i18n="triggers.glob_negation">tout sauf a, b, c</span><br>
+          <span data-i18n="triggers.glob_examples">Exemples :</span> <code style="color:var(--accent2)">FK*</code> → FK3, FK42 &nbsp;|&nbsp;
+          <code style="color:var(--accent2)">REF[0-9][0-9][0-9]</code> → REF001
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+          <div class="slabel" style="margin-bottom:8px" data-i18n="triggers.generate_separator">Generate the separator page</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select class="sinput" id="tp-code-type" style="width:130px">
+              <option value="qr">QR Code</option>
+              <option value="barcode" data-i18n="triggers.barcode_option">Code-barres (Code128)</option>
+            </select>
+            <button class="btn" id="tp-separator-btn" onclick="downloadSeparator()" data-i18n="triggers.download_pdf">
+              ⬇ Download PDF
+            </button>
+            <span id="tp-separator-msg" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></span>
+          </div>
+        </div>
+      </div>
+      <div class="trigger-add">
+        <input class="sinput" type="text" id="new-trigger" data-i18n-placeholder="common.new_value_placeholder" placeholder="Nouvelle valeur…" onkeydown="if(event.key==='Enter')addTrigger()">
+        <button class="btn" onclick="addTrigger()" data-i18n="common.add">Ajouter</button>
+      </div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:6px" data-i18n="triggers.empty_warning">
+        ⚠ If empty, all codes trigger a split
+      </div>
+    </div>
+
+    <!-- 2. Filename construction -->
+    <div class="sgroup" style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border)">
+      <div class="slabel" data-i18n="filename.section_title">Filename construction — drag to reorder</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <span style="font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap" data-i18n="filename.separator_label">Separator:</span>
+        <div style="display:flex;gap:6px" id="sep-buttons">
+          <button class="btn secondary" id="sep-_" onclick="setSeparator('_')">_</button>
+          <button class="btn secondary" id="sep--" onclick="setSeparator('-')">-</button>
+          <button class="btn secondary" id="sep-." onclick="setSeparator('.')">.</button>
+          <button class="btn secondary" id="sep-none" onclick="setSeparator('')" data-i18n="filename.separator_none">aucun</button>
+        </div>
+        <span id="unsaved-warning" style="font-family:var(--mono);font-size:12px;color:#f5a623;display:none;flex:1;text-align:center" data-i18n="common.unsaved_warning">
+          ⚠ Unsaved changes
+        </span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+        <div>
+          <div class="token-list" id="token-list"></div>
+          <div style="margin-top:6px">
+            <button class="btn secondary" onclick="addStringToken()" data-i18n="filename.add_free_text">+ Ajouter un texte libre</button>
+          </div>
+        </div>
+        <div>
+          <div style="padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <button class="btn danger" onclick="resetCounter()" data-i18n="filename.reset_counter">Reset counter</button>
+              <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">
+                <span data-i18n="filename.current_value">valeur actuelle :</span> <span id="counter-current" style="color:var(--accent2)">–</span>
+              </span>
+            </div>
+          </div>
+          <div>
+            <div class="clabel" style="margin-bottom:6px" data-i18n="filename.preview">Preview</div>
+            <div class="filename-preview" id="fn-preview">–</div>
+            <div class="filename-error" id="fn-error"></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+              <button class="btn" id="save-format-btn" onclick="saveTokens()" data-i18n="filename.save_format" disabled>Enregistrer le format</button>
+              <span class="save-status" id="save-ok" data-i18n="filename.saved">✓ Saved</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Options (collapsible, closed by default) -->
+    <div class="osection">
+      <div class="osection-header" onclick="toggleOptionsSection()">
+        <span class="slabel" style="margin:0" data-i18n="options.section_title">Options</span>
+        <span id="options-arrow">▶</span>
+      </div>
+      <div id="options-body" style="display:none">
+
+        <!-- Separator placement -->
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:5px" data-i18n="options.separator_placement">Separator placement</div>
+          <div style="display:flex;gap:20px">
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px">
+              <input type="radio" name="opt-sep-placement" id="opt-sep-before" value="before">
+              <span data-i18n="options.separator_before">Before the document</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px">
+              <input type="radio" name="opt-sep-placement" id="opt-sep-after" value="after">
+              <span data-i18n="options.separator_after">After the document</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Toggles 2-column grid -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-bottom:14px">
+          <div class="toggle-row">
+            <label class="toggle"><input type="checkbox" id="opt-subdirs"><span class="toggle-slider"></span></label>
+            <span class="toggle-label" data-i18n="options.subdirs">Sort into subfolders by trigger</span>
+          </div>
+          <div class="toggle-row">
+            <label class="toggle"><input type="checkbox" id="opt-delete"><span class="toggle-slider"></span></label>
+            <span class="toggle-label" data-i18n="options.archive_source">Archive source file after processing</span>
+          </div>
+          <div class="toggle-row">
+            <label class="toggle"><input type="checkbox" id="opt-log-verbose"><span class="toggle-slider"></span></label>
+            <span class="toggle-label" data-i18n="options.verbose_log">Detailed log</span>
+          </div>
+          <!-- Interface language selector -->
+          <div class="toggle-row">
+            <span class="toggle-label" data-i18n="settings.language_label">Interface language</span>
+            <div style="display:flex;gap:6px;margin-left:auto">
+              <button class="btn secondary" id="lang-btn-fr" style="font-size:11px;padding:3px 10px" onclick="setLanguage('fr')">FR</button>
+              <button class="btn secondary" id="lang-btn-en" style="font-size:11px;padding:3px 10px" onclick="setLanguage('en')">EN</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel buttons -->
+        <div style="margin-top:14px;border-top:0.5px solid var(--border);padding-top:14px">
+          <button class="btn danger" onclick="confirmResetStats()"
+            style="font-size:12px;display:flex;align-items:center;gap:8px;justify-content:center;width:100%;margin-bottom:8px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+            </svg>
+            <span data-i18n="options.reset_stats">Reset statistics</span>
+          </button>
+          <div style="display:flex;gap:8px">
+            <button class="btn secondary" onclick="toggleDirsPanel()" id="dirs-panel-btn"
+              style="font-size:12px;display:flex;align-items:center;gap:6px;flex:1;justify-content:center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+              </svg>
+              <span data-i18n="options.configure_dirs">Configurer les dossiers</span>
+              <span id="dirs-panel-arrow">▶</span>
+            </button>
+            <button class="btn secondary" onclick="toggleEmailSection()" id="email-panel-btn"
+              style="font-size:12px;display:flex;align-items:center;gap:6px;flex:1;justify-content:center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+              <span data-i18n="options.configure_email">Configurer l'email</span>
+              <span id="email-panel-arrow">▶</span>
+            </button>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn secondary" onclick="toggleWebhookPanel()" id="webhook-panel-btn"
+              style="font-size:12px;display:flex;align-items:center;gap:6px;flex:1;justify-content:center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+              <span data-i18n="options.configure_webhook">Webhook HTTP</span>
+              <span id="webhook-panel-arrow">▶</span>
+            </button>
+            <button class="btn secondary" onclick="toggleApiKeyPanel()" id="apikey-panel-btn"
+              style="font-size:12px;display:flex;align-items:center;gap:6px;flex:1;justify-content:center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path d="M21 2l-9.6 9.6M15.5 7.5l3 3"/><circle cx="7.5" cy="15.5" r="4.5"/>
+              </svg>
+              <span data-i18n="options.configure_apikey">Accès API</span>
+              <span id="apikey-panel-arrow">▶</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Folders inline panel -->
+        <div id="dirs-panel" style="display:none;margin-top:10px;border:1px solid var(--accent2);border-radius:4px;padding:14px;background:var(--surface2)">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--accent2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.08em" data-i18n="dirs.panel_title">
+            ⚙ Configuration des dossiers
+          </div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:10px">
+            <span data-i18n="dirs.root_label">Dossier racine :</span> <span style="color:var(--accent)" id="dir-data-root">–</span>
+            &nbsp;·&nbsp; <span data-i18n="dirs.relative_paths">Paths relative to root</span>
+          </div>
+          <table class="dirs-table" id="dirs-table">
+            <tbody id="dirs-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Email inline panel: configuration list -->
+        <div id="email-section" style="display:none;margin-top:10px;border:1px solid var(--accent2);border-radius:4px;padding:14px;background:var(--surface2)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="font-family:var(--mono);font-size:11px;color:var(--accent2);text-transform:uppercase;letter-spacing:.08em" data-i18n="email.panel_title">
+              ⚙ Configurations email IMAP
+            </div>
+            <span id="email-unsaved-warning" style="font-family:var(--mono);font-size:12px;color:#f5a623;display:none" data-i18n="common.unsaved_warning">
+              ⚠ Unsaved changes
+            </span>
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:8px" data-i18n="email.config_hint">
+            Cliquer sur une configuration pour afficher ses options
+          </div>
+          <div class="trigger-list" id="email-config-list"></div>
+          <div class="trigger-panel" id="email-config-panel">
+            <div style="margin-bottom:10px">
+              <div class="clabel" style="margin-bottom:3px" data-i18n="email.config_name">Nom de la configuration</div>
+              <input class="sinput" id="em-name" style="width:100%" oninput="emailFieldChanged()">
+            </div>
+            <div class="toggle-row" style="margin-bottom:10px">
+              <label class="toggle"><input type="checkbox" id="em-enabled" onchange="emailFieldChanged()"><span class="toggle-slider"></span></label>
+              <span class="toggle-label" data-i18n="email.enable_polling">Enable email retrieval</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+              <div>
+                <div class="clabel" style="margin-bottom:3px" data-i18n="email.host">Serveur IMAP</div>
+                <input class="sinput" id="em-host" placeholder="imap.example.com" style="width:100%" oninput="emailFieldChanged()">
+              </div>
+              <div>
+                <div class="clabel" style="margin-bottom:3px" data-i18n="email.port">Port</div>
+                <input class="sinput" id="em-port" type="number" value="993" style="width:100%" oninput="emailFieldChanged();emailAutoSsl()">
+              </div>
+              <div>
+                <div class="clabel" style="margin-bottom:3px" data-i18n="email.username">Utilisateur</div>
+                <input class="sinput" id="em-username" placeholder="user@example.com" style="width:100%" oninput="emailFieldChanged()">
+              </div>
+              <div>
+                <div class="clabel" style="margin-bottom:3px" data-i18n="email.password">Mot de passe</div>
+                <input class="sinput" id="em-password" type="password" data-i18n-placeholder="email.password_placeholder" placeholder="Laisser vide pour conserver" style="width:100%" oninput="emailFieldChanged()">
+              </div>
+              <div>
+                <div class="clabel" style="margin-bottom:3px" data-i18n="email.folder">Dossier IMAP</div>
+                <input class="sinput" id="em-folder" value="INBOX" style="width:100%" oninput="emailFieldChanged()">
+              </div>
+              <div>
+                <div class="clabel" style="margin-bottom:3px" data-i18n="email.interval">Intervalle (minutes)</div>
+                <input class="sinput" id="em-interval" type="number" value="5" min="1" style="width:100%" oninput="emailFieldChanged()">
+              </div>
+              <div>
+                <div class="clabel" style="margin-bottom:3px" data-i18n="email.filter_from">Sender filter (contains)</div>
+                <input class="sinput" id="em-filter-from" data-i18n-placeholder="common.optional_placeholder" placeholder="optionnel" style="width:100%" oninput="emailFieldChanged()">
+              </div>
+              <div>
+                <div class="clabel" style="margin-bottom:3px" data-i18n="email.filter_subject">Filtre objet (contient)</div>
+                <input class="sinput" id="em-filter-subject" data-i18n-placeholder="common.optional_placeholder" placeholder="optionnel" style="width:100%" oninput="emailFieldChanged()">
+              </div>
+            </div>
+            <div style="margin-bottom:10px">
+              <div class="clabel" style="margin-bottom:6px" data-i18n="email.action_after">Action after processing</div>
+              <div style="display:flex;gap:16px;font-family:var(--mono);font-size:13px">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="radio" name="em-action" value="read" onchange="emailFieldChanged()"> <span data-i18n="email.action_read">Marquer lu</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="radio" name="em-action" value="delete" onchange="emailFieldChanged()"> <span data-i18n="email.action_delete">Supprimer</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="radio" name="em-action" value="ignore" onchange="emailFieldChanged()"> <span data-i18n="email.action_ignore">Ignorer</span>
+                </label>
+              </div>
+            </div>
+            <div style="margin-bottom:10px">
+              <div class="clabel" style="margin-bottom:6px" data-i18n="email.default_trigger">Default trigger (PDFs with no code)</div>
+              <select class="sinput" id="em-default-trigger" style="width:100%" onchange="emailFieldChanged()">
+                <option value="" data-i18n="common.none_no_code">— Aucun (→ no_code) —</option>
+              </select>
+              <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:3px" data-i18n="email.default_trigger_help">
+                Applied if a downloaded PDF contains no code.
+              </div>
+            </div>
+            <div class="toggle-row" style="margin-bottom:8px">
+              <label class="toggle"><input type="checkbox" id="em-use-ssl" checked onchange="emailUseSslChanged()"><span class="toggle-slider"></span></label>
+              <span class="toggle-label" data-i18n="email.use_ssl">Use SSL/TLS</span>
+            </div>
+            <div class="toggle-row" style="margin-bottom:12px" id="em-ssl-row">
+              <label class="toggle"><input type="checkbox" id="em-ssl" checked onchange="emailFieldChanged()"><span class="toggle-slider"></span></label>
+              <span class="toggle-label" data-i18n="email.verify_ssl">Verify SSL certificate</span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+              <button class="btn" id="em-save-btn" onclick="saveEmailConfig()" data-i18n="common.save">Enregistrer</button>
+              <button class="btn secondary" onclick="testEmailConnection()" id="em-test-btn" data-i18n="email.test_connection">Tester la connexion</button>
+              <span id="em-test-result" style="font-family:var(--mono);font-size:12px;color:var(--muted);align-self:center"></span>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+              <div id="em-blocked-section" style="display:none">
+                <div style="font-family:var(--mono);font-size:12px;color:var(--error);margin-bottom:8px" data-i18n="email.blocked">
+                  ⛔ Retrieval blocked — limit reached
+                </div>
+                <button class="btn danger" onclick="resetEmailIds()" style="font-size:12px" data-i18n="email.reset_ids">
+                  Reset processed IDs
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="trigger-add">
+            <input class="sinput" type="text" id="new-email-config-name" data-i18n-placeholder="email.new_config_placeholder" placeholder="Nom de la nouvelle configuration… (optionnel)" onkeydown="if(event.key==='Enter')addEmailConfig()">
+            <button class="btn" onclick="addEmailConfig()" data-i18n="email.add_config">+ Ajouter</button>
+          </div>
+        </div>
+
+        <!-- Webhook inline panel -->
+        <div id="webhook-panel" style="display:none;margin-top:10px;border:1px solid var(--accent2);border-radius:4px;padding:14px;background:var(--surface2)">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--accent2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.08em" data-i18n="webhook.section_title">
+            ⚙ Webhook HTTP
+          </div>
+          <div class="toggle-row" style="margin-bottom:6px">
+            <label class="toggle"><input type="checkbox" id="opt-webhook-enabled"><span class="toggle-slider"></span></label>
+            <span class="toggle-label" data-i18n="webhook.enable">Enable webhook</span>
+          </div>
+          <div id="webhook-config" style="display:none">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:3px" data-i18n="webhook.url_label">URL</div>
+            <input class="sinput" type="url" id="opt-webhook-url" style="width:100%;margin-bottom:8px"
+              data-i18n-placeholder="webhook.url_placeholder" placeholder="https://example.com/webhook"
+              oninput="saveWebhookField()">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:3px" data-i18n="webhook.events_label">Events</div>
+            <select class="sinput" id="opt-webhook-events" style="width:100%;margin-bottom:8px" onchange="saveWebhookField()">
+              <option value="all"     data-i18n="webhook.events_all">All (success + errors)</option>
+              <option value="success" data-i18n="webhook.events_success">Success only</option>
+              <option value="error"   data-i18n="webhook.events_error">Errors only</option>
+            </select>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:3px" data-i18n="webhook.secret_label">HMAC-SHA256 secret (optional)</div>
+            <input class="sinput" type="password" id="opt-webhook-secret" style="width:100%;margin-bottom:4px"
+              data-i18n-placeholder="webhook.secret_placeholder" placeholder="Leave empty to disable signing"
+              oninput="saveWebhookField()">
+            <div style="font-size:10px;color:var(--muted);margin-bottom:10px" data-i18n="webhook.secret_help">
+              If set, every request includes an X-Signature: sha256=&lt;hmac&gt; header.
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn secondary" style="font-size:12px" onclick="testWebhook()" data-i18n="webhook.test_btn">Test</button>
+              <span id="webhook-test-result" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- API access inline panel -->
+        <div id="apikey-panel" style="display:none;margin-top:10px;border:1px solid var(--accent2);border-radius:4px;padding:14px;background:var(--surface2)">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--accent2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.08em" data-i18n="apikey.section_title">
+            ⚙ Accès API
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:5px" data-i18n="apikey.key_label">API key</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+            <input id="api-key-field" type="password" class="sinput" readonly style="flex:1;font-family:var(--mono);font-size:11px" value="">
+            <button class="btn secondary" style="font-size:11px;padding:4px 8px;min-width:32px" onclick="toggleApiKeyVisibility()" id="api-key-show-btn" title="Show / Hide">👁</button>
+            <button class="btn secondary" style="font-size:11px;padding:4px 8px" onclick="copyApiKey()" data-i18n="apikey.copy">Copy</button>
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:8px" data-i18n="apikey.usage">HTTP header: X-API-Key: &lt;key&gt;</div>
+          <div id="api-key-env-note" style="display:none;font-size:10px;color:var(--muted);margin-bottom:8px" data-i18n="apikey.env_note">
+            Key set via API_KEY environment variable.
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="btn secondary" style="font-size:12px" id="api-key-regen-btn" onclick="regenerateApiKey()" data-i18n="apikey.regenerate">Regenerate</button>
+            <span id="api-key-status" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Activity log -->
+<div class="section-title" data-i18n="journal.title">Activity log</div>
+<div class="log-wrap" id="log-wrap"></div>
+
+</main>
+<footer><span data-i18n="app.title_footer">pdf-dispatch</span> <span id="app-version">–</span> <span data-i18n="footer.auto_refresh">— actualisation auto. 3 s</span></footer>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,1147 @@
+openapi: "3.1.0"
+
+info:
+  title: pdf-dispatch
+  version: "1.26.0"
+  description: |
+    Self-hosted PDF splitting service. Watches a folder, splits multi-page
+    PDFs on barcode/QR code detection, and routes output documents by trigger code.
+
+    Configurable entirely from the web interface; every setting is also accessible
+    via this REST API, making pdf-dispatch scriptable from Home Assistant, n8n,
+    Node-RED, shell scripts, and any HTTP client.
+
+    ## Authentication
+
+    All endpoints except `/healthz` support two methods (checked in order):
+
+    1. **API key** *(recommended for scripts)*: `X-API-Key: <key>` header.  
+       The key is auto-generated at startup and shown in the *API access* section
+       of the web interface. Override with the `API_KEY` environment variable.
+
+    2. **HTTP Basic auth**: active only when both `APP_USERNAME` and
+       `APP_PASSWORD` environment variables are set.
+
+    If neither is configured the API is open (trusted network assumption).
+    If `X-API-Key` is present but wrong the request is **always rejected**
+    — there is no fall-through to Basic auth.
+
+  contact:
+    name: pdf-dispatch on GitHub
+    url: https://github.com/Lheriss/pdf-dispatch
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: /
+    description: This pdf-dispatch instance
+
+tags:
+  - name: documents
+    description: Upload, download, and list processed PDFs
+  - name: tasks
+    description: Track asynchronous file-processing tasks
+  - name: config
+    description: Read and update application configuration
+  - name: email
+    description: IMAP email retrieval
+  - name: dirs
+    description: Output folder management
+  - name: webhook
+    description: Outbound HTTP webhook
+  - name: system
+    description: Health, statistics, activity log, API key
+
+security:
+  - apiKey: []
+  - basicAuth: []
+  - {}
+
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        Auto-generated 64-character hex key. Visible (and regeneratable) in
+        the *API access* section of the web interface. Override with the
+        `API_KEY` environment variable.
+    basicAuth:
+      type: http
+      scheme: basic
+      description: >
+        Active only when both `APP_USERNAME` and `APP_PASSWORD` environment
+        variables are set.
+
+  schemas:
+
+    OkTrue:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+
+    Error:
+      type: object
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        error:
+          type: string
+          description: Human-readable error description (in the active UI language).
+
+    TaskOutput:
+      type: object
+      required: [filename, path, download_url]
+      properties:
+        filename:
+          type: string
+          example: INVOICE_000042.pdf
+        path:
+          type: string
+          description: Path relative to DATA_DIR.
+          example: output/INVOICE_000042.pdf
+        download_url:
+          type: string
+          description: Ready-to-use URL for GET /api/file/{filepath}.
+          example: /api/file/output/INVOICE_000042.pdf
+
+    Task:
+      type: object
+      required: [id, filename, status, created_at, updated_at, triggers, outputs, docs_count, error]
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 34ec8a5a-4c16-4991-854f-8a3d4a08c4f4
+        filename:
+          type: string
+          example: batch_scan.pdf
+        status:
+          type: string
+          enum: [pending, processing, success, error]
+          description: |
+            - `pending`: file saved in INPUT_DIR, watchdog not yet started
+            - `processing`: past stabilisation and PDF validity check
+            - `success`: all output files written
+            - `error`: invalid PDF, non-PDF file, or unexpected exception
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:30:00"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:30:05"
+        triggers:
+          type: array
+          items:
+            type: string
+          description: Trigger codes detected in the source file (populated on success).
+          example: [INVOICE]
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskOutput"
+          description: Output files produced (populated on success).
+        docs_count:
+          type: integer
+          description: Number of output documents produced.
+          example: 2
+        error:
+          type: string
+          description: Error description when status is "error"; empty otherwise.
+          example: ""
+        config_override:
+          type: object
+          description: >
+            Per-file configuration override supplied at upload time (if any).
+            Always present; empty object `{}` when no override was provided.
+            Keys match those accepted by POST /api/upload (split_values,
+            separator_placement, subdirs_by_trigger, delete_source, log_verbose).
+          example:
+            separator_placement: after
+            split_values:
+              - {value: FACTURE, page_handling: delete, case_sensitive: true}
+
+    RecentFile:
+      type: object
+      required: [filename, path, download_url, size_bytes, modified]
+      properties:
+        filename:
+          type: string
+          example: INVOICE_000042.pdf
+        path:
+          type: string
+          description: Path relative to DATA_DIR. Use directly in GET /api/file/{path}.
+          example: output/INVOICE_000042.pdf
+        download_url:
+          type: string
+          example: /api/file/output/INVOICE_000042.pdf
+        size_bytes:
+          type: integer
+          example: 45312
+        modified:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:30:05"
+
+    UploadedFile:
+      type: object
+      required: [filename, task_id]
+      properties:
+        filename:
+          type: string
+          description: >
+            Filename as saved in INPUT_DIR (may differ from the original due to
+            collision-avoidance counter suffixing).
+          example: invoice_001.pdf
+        task_id:
+          type: string
+          format: uuid
+          description: Use with GET /api/tasks/{task_id} to track processing.
+          example: 34ec8a5a-4c16-4991-854f-8a3d4a08c4f4
+        override:
+          type: object
+          description: >
+            Echo of the config_override applied to this file. Present only when
+            at least one override field was provided in the request; omitted otherwise.
+          example:
+            separator_placement: after
+            split_values:
+              - {value: FACTURE, page_handling: delete, case_sensitive: true}
+
+    Trigger:
+      type: object
+      required: [value, page_handling, case_sensitive]
+      properties:
+        value:
+          type: string
+          description: >
+            Exact code value or glob pattern (* ? [abc] [0-9]) to match
+            against detected barcodes/QR codes.
+          example: INVOICE
+        page_handling:
+          type: string
+          enum: [keep, delete]
+          description: |
+            Combined with the global `separator_placement` option:
+            - `keep + before` → trigger page is first page of output document
+            - `keep + after`  → trigger page is last page of output document
+            - `delete`        → trigger page removed regardless of placement
+          default: keep
+        case_sensitive:
+          type: boolean
+          default: true
+
+paths:
+
+  # ── Health ─────────────────────────────────────────────────────────────────
+
+  /healthz:
+    get:
+      summary: Health check
+      description: >
+        Always returns `{"ok": true}`. Not protected by authentication.
+        Used by Docker HEALTHCHECK.
+      operationId: healthz
+      tags: [system]
+      security: []
+      responses:
+        "200":
+          description: Service is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkTrue"
+
+  # ── Config & state ─────────────────────────────────────────────────────────
+
+  /api/state:
+    get:
+      summary: Full application state
+      description: |
+        Main polling endpoint — queried every 3 s by the web interface.
+        Returns in a single call: statistics, recent activity log, email
+        polling status, and the complete sanitised application configuration
+        (password hashes are never included).
+      operationId: getState
+      tags: [config]
+      responses:
+        "200":
+          description: Current state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [true]
+                  stats:
+                    type: object
+                    description: Persistent processing statistics.
+                    properties:
+                      processed:  {type: integer}
+                      split_docs: {type: integer}
+                      errors:     {type: integer}
+                      last_file:  {type: string, nullable: true}
+                      last_time:  {type: string, nullable: true}
+                  log:
+                    type: array
+                    description: Recent activity log (newest first).
+                    items:
+                      type: object
+                      properties:
+                        level:   {type: string}
+                        message: {type: string}
+                        time:    {type: string}
+                        file:    {type: string, nullable: true}
+                  queue:
+                    type: array
+                    description: Filenames currently being processed.
+                    items: {type: string}
+                  app_config:
+                    type: object
+                    description: |
+                      Complete application configuration. Key fields:
+                    properties:
+                      language:             {type: string, enum: [fr, en]}
+                      separator_placement:  {type: string, enum: [before, after]}
+                      split_values:
+                        type: array
+                        items: {$ref: "#/components/schemas/Trigger"}
+                      subdirs_by_trigger:   {type: boolean}
+                      delete_source:        {type: boolean}
+                      log_verbose:          {type: boolean}
+                      filename_separator:   {type: string}
+                      counter:              {type: integer}
+                      api_key:              {type: string}
+                      _api_key_env_set:     {type: boolean}
+                      webhook_enabled:      {type: boolean}
+                      webhook_url:          {type: string}
+                      webhook_events:
+                        type: string
+                        enum: [all, success, error]
+                  email:
+                    type: object
+                    description: Email polling summary.
+        "401":
+          description: Authentication required or invalid API key.
+
+  /api/config:
+    post:
+      summary: Update configuration
+      description: |
+        Merges the provided object into the persistent configuration (top-level
+        merge only). For nested keys such as `dirs`, provide the complete
+        updated object.
+
+        Common use-cases:
+
+        ```json
+        // Change language
+        {"language": "fr"}
+
+        // Update triggers
+        {"split_values": [
+          {"value": "INVOICE", "page_handling": "keep", "case_sensitive": true}
+        ]}
+
+        // Enable webhook
+        {"webhook_enabled": true,
+         "webhook_url": "https://ha.local:8123/api/webhook/pdf",
+         "webhook_events": "success"}
+
+        // Set separator placement
+        {"separator_placement": "after"}
+        ```
+      operationId: updateConfig
+      tags: [config]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Partial configuration to merge.
+      responses:
+        "200":
+          description: Complete updated configuration.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     {type: boolean, enum: [true]}
+                  config: {type: object}
+
+  /api/config/validate_tokens:
+    post:
+      summary: Validate filename token list
+      description: Validates a filename token configuration without persisting it.
+      operationId: validateTokens
+      tags: [config]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tokens:
+                  type: array
+                  items: {type: object}
+      responses:
+        "200":
+          description: Validation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:    {type: boolean}
+                  error: {type: string, description: Present when ok is false.}
+
+  # ── Documents ──────────────────────────────────────────────────────────────
+
+  /api/upload:
+    post:
+      summary: Upload PDFs for processing
+      description: |
+        Receives one or more PDFs, saves them in INPUT_DIR, and returns a
+        `task_id` per file for tracking via GET /api/tasks/{task_id}.
+
+        ## Barcode-free fallback: `trigger`
+
+        Use `trigger` (or `default_trigger`) to name files that contain no
+        barcode — without changing the global configuration.
+
+        ## Per-file configuration override
+
+        The following fields temporarily replace their global counterparts
+        **for the processing of files in this request only**. The persistent
+        configuration is never modified. All fields are optional; omitted
+        fields inherit the global value.
+
+        | Field | Type | Description |
+        |---|---|---|
+        | `split_values` | JSON string | Trigger list (array of objects). Empty `[]` = split on every code. |
+        | `separator_placement` | string | `"before"` or `"after"` |
+        | `subdirs_by_trigger` | bool string | `"true"` / `"false"` |
+        | `delete_source` | bool string | `"true"` / `"false"` |
+        | `log_verbose` | bool string | `"true"` / `"false"` |
+
+        `split_values` and `trigger` are independent: `split_values` controls
+        which barcodes trigger a split; `trigger` is the fallback when no code
+        is detected.
+
+        ```bash
+        # Override triggers and placement for this upload only
+        curl -F "file=@batch.pdf" \
+             -F 'split_values=[{"value":"FACTURE","page_handling":"delete","case_sensitive":true}]' \
+             -F "separator_placement=after" \
+             -F "subdirs_by_trigger=true" \
+             -H "X-API-Key: <key>" http://nas:5880/api/upload
+        ```
+
+        The applied override is echoed in each saved-file entry as `"override"`
+        and stored in the task under `"config_override"`.
+      operationId: uploadFiles
+      tags: [documents]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Single PDF file (alias for `files`).
+                files:
+                  type: array
+                  items: {type: string, format: binary}
+                  description: One or more PDF files.
+                trigger:
+                  type: string
+                  description: >
+                    Default trigger code for barcode-free files (alias: `default_trigger`).
+                  example: INVOICE
+                split_values:
+                  type: string
+                  description: >
+                    JSON array of trigger objects. Replaces the global split_values
+                    for this upload only. Each object must have `value` (string) and
+                    may have `page_handling` ("keep"|"delete", default "keep") and
+                    `case_sensitive` (boolean, default true). Empty array `[]` means
+                    every detected code triggers a split.
+                  example: '[{"value":"FACTURE","page_handling":"delete","case_sensitive":true}]'
+                separator_placement:
+                  type: string
+                  enum: [before, after]
+                  description: >
+                    Overrides separator placement for this upload only.
+                subdirs_by_trigger:
+                  type: string
+                  enum: ["true", "false", "1", "0", "yes", "no"]
+                  description: Overrides subfolders-by-trigger option.
+                delete_source:
+                  type: string
+                  enum: ["true", "false", "1", "0", "yes", "no"]
+                  description: Overrides source-archiving option.
+                log_verbose:
+                  type: string
+                  enum: ["true", "false", "1", "0", "yes", "no"]
+                  description: Overrides verbose-logging option.
+      responses:
+        "200":
+          description: Upload result. `errors` lists per-file validation failures.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [true]
+                  saved:
+                    type: array
+                    items: {$ref: "#/components/schemas/UploadedFile"}
+                  errors:
+                    type: array
+                    items: {type: string}
+              example:
+                ok: true
+                saved:
+                  - filename: batch.pdf
+                    task_id: 34ec8a5a-4c16-4991-854f-8a3d4a08c4f4
+                    override:
+                      separator_placement: after
+                      split_values:
+                        - {value: FACTURE, page_handling: delete, case_sensitive: true}
+                errors: []
+        "400":
+          description: No file provided.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/file/{filepath}:
+    get:
+      summary: Download output file
+      description: |
+        Serves a file from OUTPUT_DIR. The `path` field returned by
+        GET /api/recent and GET /api/tasks can be used directly as `{filepath}`.
+
+        Access is restricted to OUTPUT_DIR — the configuration file and
+        in-progress input PDFs are never accessible.
+      operationId: downloadFile
+      tags: [documents]
+      parameters:
+        - name: filepath
+          in: path
+          required: true
+          schema: {type: string}
+          description: Path relative to DATA_DIR (e.g. `output/INVOICE_001.pdf`).
+          example: output/INVOICE_001.pdf
+        - name: download
+          in: query
+          schema:
+            type: string
+            enum: ["0", "1"]
+            default: "0"
+          description: "`1` forces Content-Disposition: attachment (download dialog)."
+      responses:
+        "200":
+          description: File content with appropriate Content-Type header.
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        "403":
+          description: Path resolves outside OUTPUT_DIR.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "404":
+          description: File not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/recent:
+    get:
+      summary: List recent output files
+      description: >
+        Lists files in OUTPUT_DIR (excluding /error and /processed),
+        sorted by modification time (newest first).
+      operationId: listRecentFiles
+      tags: [documents]
+      parameters:
+        - name: n
+          in: query
+          schema: {type: integer, default: 20, maximum: 100}
+          description: Maximum number of entries to return.
+      responses:
+        "200":
+          description: File list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:    {type: boolean, enum: [true]}
+                  files:
+                    type: array
+                    items: {$ref: "#/components/schemas/RecentFile"}
+                  total: {type: integer, description: Total files found before truncation.}
+        "500":
+          description: Filesystem error.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/separator/{trigger_idx}:
+    get:
+      summary: Download separator PDF
+      description: |
+        Generates a single-page A4 separator PDF containing the trigger code
+        as a QR code or Code128 barcode. Print it and insert it between
+        documents before scanning.
+
+        Not available for glob-pattern triggers (e.g. `INVOICE*`).
+      operationId: downloadSeparator
+      tags: [documents]
+      parameters:
+        - name: trigger_idx
+          in: path
+          required: true
+          schema: {type: integer, minimum: 0}
+          description: Zero-based index in the `split_values` list.
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [qr, barcode]
+            default: qr
+          description: Code format (QR code or Code128 barcode).
+      responses:
+        "200":
+          description: Separator PDF.
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        "400":
+          description: Trigger is a glob pattern — cannot generate separator.
+        "404":
+          description: Trigger index out of range.
+
+  # ── Tasks ──────────────────────────────────────────────────────────────────
+
+  /api/tasks:
+    get:
+      summary: List recent upload tasks
+      description: |
+        Lists tasks created by POST /api/upload, newest first.
+
+        Tasks are stored in memory (max 200, FIFO eviction). They are **not**
+        persisted across restarts. Files dropped directly into INPUT_DIR or
+        received via email do not generate tasks.
+      operationId: listTasks
+      tags: [tasks]
+      parameters:
+        - name: n
+          in: query
+          schema: {type: integer, default: 20, maximum: 200}
+          description: Maximum number of tasks to return.
+      responses:
+        "200":
+          description: Task list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:    {type: boolean, enum: [true]}
+                  tasks:
+                    type: array
+                    items: {$ref: "#/components/schemas/Task"}
+                  total: {type: integer}
+
+  /api/tasks/{task_id}:
+    get:
+      summary: Get task status
+      description: |
+        Returns the status of a specific upload task.
+
+        **Typical polling pattern:**
+        ```python
+        import requests, time
+
+        r = requests.post("http://nas:5880/api/upload",
+                          files={"file": open("scan.pdf", "rb")},
+                          headers={"X-API-Key": key})
+        task_id = r.json()["saved"][0]["task_id"]
+
+        while True:
+            task = requests.get(f"http://nas:5880/api/tasks/{task_id}",
+                                headers={"X-API-Key": key}).json()["task"]
+            if task["status"] in ("success", "error"):
+                break
+            time.sleep(1)
+
+        for doc in task["outputs"]:
+            print(doc["filename"], doc["download_url"])
+        ```
+
+        Processing typically takes 2–10 s depending on PDF size and DPI.
+      operationId: getTask
+      tags: [tasks]
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+          description: Task UUID returned by POST /api/upload.
+      responses:
+        "200":
+          description: Task details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:   {type: boolean, enum: [true]}
+                  task: {$ref: "#/components/schemas/Task"}
+        "404":
+          description: Task not found (unknown ID or evicted from memory).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  # ── Directories ────────────────────────────────────────────────────────────
+
+  /api/dirs/rename:
+    post:
+      summary: Rename output folder
+      description: Renames a folder in the configuration and moves it on the filesystem.
+      operationId: renameDir
+      tags: [dirs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, path]
+              properties:
+                key:
+                  type: string
+                  enum: [input, output, error, processed, no_code]
+                path:
+                  type: string
+                  description: New relative path (relative to DATA_DIR, no leading slash).
+                  example: output/invoices
+            example:
+              key: no_code
+              path: output/unmatched
+      responses:
+        "200":
+          description: Folder renamed successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     {type: boolean, enum: [true]}
+                  config: {type: object, description: Updated dirs configuration.}
+        "400":
+          description: Unknown key or invalid path.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "409":
+          description: Path already in use, destination exists, or processing in progress.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/dirs/recreate:
+    post:
+      summary: Recreate deleted folder
+      description: Creates the folder on disk if it was accidentally deleted.
+      operationId: recreateDir
+      tags: [dirs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key:
+                  type: string
+                  enum: [input, output, error, processed, no_code]
+            example:
+              key: no_code
+      responses:
+        "200":
+          description: Folder recreated.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OkTrue"}
+        "400":
+          description: Unknown folder key.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  # ── Email ──────────────────────────────────────────────────────────────────
+
+  /api/email/configs:
+    post:
+      summary: Create IMAP configuration
+      description: Adds a new email polling configuration.
+      operationId: createEmailConfig
+      tags: [email]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, host, port, username]
+              properties:
+                name:            {type: string}
+                host:            {type: string}
+                port:            {type: integer, default: 993}
+                username:        {type: string}
+                password:        {type: string, description: Stored encrypted.}
+                folder:          {type: string, default: INBOX}
+                verify_ssl:      {type: boolean, default: true}
+                use_ssl:         {type: boolean, default: true, description: 'true = IMAP4_SSL (port 993), false = plain IMAP (port 143)'}
+                enabled:         {type: boolean, default: true}
+                action:
+                  type: string
+                  enum: [read, delete, ignore]
+                  default: read
+                  description: Action on messages after download.
+                poll_interval:   {type: integer, default: 5, description: "Minutes between polls."}
+                filter_from:     {type: string, description: Filter by sender (contains).}
+                filter_subject:  {type: string, description: Filter by subject (contains).}
+                default_trigger: {type: string, description: Trigger for barcode-free attachments.}
+      responses:
+        "200":
+          description: Created configuration (password never returned).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     {type: boolean, enum: [true]}
+                  config: {type: object}
+        "409":
+          description: Duplicate name or identical configuration already exists.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/email/configs/{config_id}:
+    post:
+      summary: Update IMAP configuration
+      operationId: updateEmailConfig
+      tags: [email]
+      parameters:
+        - name: config_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Fields to update (same schema as create; omit unchanged fields).
+      responses:
+        "200":
+          description: Updated configuration.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     {type: boolean, enum: [true]}
+                  config: {type: object}
+        "404":
+          description: Configuration not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "409":
+          description: Duplicate name or configuration.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+    delete:
+      summary: Delete IMAP configuration
+      operationId: deleteEmailConfig
+      tags: [email]
+      parameters:
+        - name: config_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Configuration deleted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OkTrue"}
+        "404":
+          description: Configuration not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/email/test:
+    post:
+      summary: Test IMAP connection
+      description: >
+        Connects to the IMAP server and counts messages in the specified folder.
+        The connection is not saved. Supply either `password` (clear text, for
+        new configurations) or `id` (reuse the stored encrypted password).
+      operationId: testEmailConnection
+      tags: [email]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, port, username]
+              properties:
+                name:       {type: string}
+                host:       {type: string}
+                port:       {type: integer}
+                username:   {type: string}
+                password:   {type: string}
+                id:         {type: string, description: Config ID to reuse stored password.}
+                folder:     {type: string, default: INBOX}
+                verify_ssl: {type: boolean, default: true}
+      responses:
+        "200":
+          description: Connection successful.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:      {type: boolean, enum: [true]}
+                  message: {type: string, example: "3 message(s) in INBOX"}
+        "502":
+          description: Connection failed (wrong credentials, network error, etc.).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/email/reset_ids/{config_id}:
+    post:
+      summary: Reset processed message IDs
+      description: |
+        Clears the processed Message-ID list and lifts the `polling_blocked`
+        flag if set. Messages already processed may be re-downloaded on the
+        next poll cycle depending on the configured action.
+
+        Use after adjusting an over-broad filter or after a long inactivity period.
+      operationId: resetEmailIds
+      tags: [email]
+      parameters:
+        - name: config_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: IDs reset.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OkTrue"}
+        "404":
+          description: Configuration not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  # ── Webhook ────────────────────────────────────────────────────────────────
+
+  /api/webhook/test:
+    post:
+      summary: Send test webhook
+      description: |
+        Sends a test payload to the configured webhook URL synchronously and
+        returns the HTTP status code received by the target.
+
+        The test payload has `"event": "test"` and otherwise the same structure
+        as a real `file.processed` event. When a file is processed with a
+        per-file config override, the payload includes a `"config_override"` field:
+
+        ```json
+        {
+          "event": "file.processed",
+          "source_file": "batch.pdf",
+          "status": "success",
+          "triggers": ["FACTURE"],
+          "documents": [...],
+          "docs_count": 1,
+          "error": "",
+          "config_override": {
+            "separator_placement": "after",
+            "split_values": [{"value": "FACTURE", "page_handling": "delete", "case_sensitive": true}]
+          }
+        }
+        ```
+
+        The `config_override` field is omitted when no override was used.
+      operationId: testWebhook
+      tags: [webhook]
+      responses:
+        "200":
+          description: Webhook delivered (check `ok` — target may have returned non-2xx).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:   {type: boolean}
+                  code: {type: integer, description: HTTP status from the target.}
+        "400":
+          description: No webhook URL configured.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "502":
+          description: Target unreachable or returned an error.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  # ── System ─────────────────────────────────────────────────────────────────
+
+  /api/settings/regenerate-api-key:
+    post:
+      summary: Regenerate API key
+      description: |
+        Generates a new 64-character hex API key and persists it. The old
+        key stops working immediately.
+
+        Disabled when the key is set via the `API_KEY` environment variable.
+      operationId: regenerateApiKey
+      tags: [system]
+      responses:
+        "200":
+          description: New key generated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:  {type: boolean, enum: [true]}
+                  key: {type: string, description: New API key (64-char hex).}
+        "400":
+          description: Key is set via environment variable; regeneration disabled.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/stats/reset:
+    post:
+      summary: Reset statistics
+      description: Resets processed / split_docs / errors counters to zero.
+      operationId: resetStats
+      tags: [system]
+      responses:
+        "200":
+          description: Statistics reset.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OkTrue"}
+
+  /api/log:
+    post:
+      summary: Add activity log entry
+      description: >
+        Appends an entry to the in-memory activity log. Used internally by
+        the web interface to record UI-side events (configuration changes,
+        separator generation, etc.).
+      operationId: addLogEntry
+      tags: [system]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                level:   {type: string, enum: [info, warning, error], default: info}
+                message: {type: string}
+            example:
+              level: info
+              message: "Config updated by script"
+      responses:
+        "200":
+          description: Entry added.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OkTrue"}
+
+  # ── OpenAPI self-description ───────────────────────────────────────────────
+
+  /api/openapi.json:
+    get:
+      summary: OpenAPI spec (JSON)
+      description: This specification as a JSON object.
+      operationId: getOpenApiJson
+      tags: [system]
+      security: []
+      responses:
+        "200":
+          description: OpenAPI 3.1 description.
+          content:
+            application/json:
+              schema: {type: object}
+
+  /api/openapi.yaml:
+    get:
+      summary: OpenAPI spec (YAML)
+      description: This specification as a YAML document.
+      operationId: getOpenApiYaml
+      tags: [system]
+      security: []
+      responses:
+        "200":
+          description: OpenAPI 3.1 description.
+          content:
+            application/yaml:
+              schema: {type: string}
+
+  /api/docs:
+    get:
+      summary: Interactive API documentation (Swagger UI)
+      description: Browser-based interactive documentation loaded from a CDN.
+      operationId: getApiDocs
+      tags: [system]
+      security: []
+      responses:
+        "200":
+          description: Swagger UI HTML page.
+          content:
+            text/html:
+              schema: {type: string}

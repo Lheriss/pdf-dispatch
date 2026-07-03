@@ -1,0 +1,96 @@
+services:
+  pdf-dispatch:
+    # Image published automatically to GitHub Container Registry
+    # on every push to main via .github/workflows/docker-build.yml
+    image: ghcr.io/lheriss/pdf-dispatch:latest
+    container_name: pdf-dispatch
+    restart: unless-stopped
+
+    environment:
+      # Single root folder — all subfolders are managed by the app beneath it
+      DATA_DIR: /data
+
+      # UID/GID of the host user who should own output files.
+      # Set PUID and PGID in Portainer's "Environment variables" section,
+      # or run 'id <youruser>' in SSH to find the right values.
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+
+      BARCODE_SCANNER:  ZXING
+      BARCODE_DPI:      "300"
+      BARCODE_UPSCALE:  "1.0"
+      MAX_LOG_ENTRIES:  "200"
+
+      FILE_STABLE_TIMEOUT:  "60"
+      FILE_STABLE_INTERVAL: "2"
+
+      TZ: "${TZ:-Europe/Zurich}"
+      # APP_VERSION is injected at build time via ARG GIT_SHA in the
+      # Dockerfile. Do NOT set it here — a value here would override the
+      # build-time SHA and break version tracing in /api/runtime and any
+      # session/diagnostic logging that reads it.
+
+      # Interface language at first startup ("fr" or "en").
+      # Once the config file exists the saved value takes precedence.
+      # APP_LANGUAGE: "${APP_LANGUAGE:-fr}"
+
+      # Encryption key for stored IMAP passwords.
+      # ⚠️ Set this once and never change it.
+      # Generate with: openssl rand -hex 32
+      # Set EMAIL_SECRET in Portainer's "Environment variables" section.
+      EMAIL_SECRET: "${EMAIL_SECRET:-}"
+
+      # HTTP Basic authentication (optional).
+      # APP_USERNAME: "${APP_USERNAME:-}"
+      # APP_PASSWORD: "${APP_PASSWORD:-}"
+
+    volumes:
+      # ⚠️ Set DATA_VOLUME in Portainer's "Environment variables" section.
+      # Example: DATA_VOLUME=/opt/pdf-dispatch/data
+      - "${DATA_VOLUME:-/data}:/data"
+      # Writable scratch space for PDF page rendering (pdf2image writes
+      # rendered pages here). Required for read_only below: the rest of the
+      # filesystem is never written to (verified against the source).
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: "${TMP_SIZE:-512m}"
+
+    ports:
+      - "${PORT:-5880}:5000"
+
+    # ── Resource limits ────────────────────────────────────────────────────
+    # Bound worst-case memory/process-count from a malicious or oversized PDF
+    # so a single bad file can't OOM-kill this container or starve others.
+    # Tune via the env vars below for your hardware and workload.
+    #
+    # Note: cpus: is intentionally absent. CPU CFS quota requires kernel
+    # support (CONFIG_CFS_BANDWIDTH) and mounted cgroup controllers — not
+    # available on all NAS kernels (e.g. Synology DSM). Setting it on an
+    # unsupported kernel causes Portainer/Docker to refuse the entire stack.
+    # To cap CPU on a supported host, add: cpus: "${CPU_LIMIT:-2.0}"
+    mem_limit: "${MEM_LIMIT:-2g}"
+    memswap_limit: "${MEM_LIMIT:-2g}"   # = mem_limit -> disables swap for this container
+    pids_limit: "${PIDS_LIMIT:-256}"
+
+    # ── Hardening ───────────────────────────────────────────────────────────
+    security_opt:
+      - no-new-privileges:true
+    # Root is required briefly at startup (entrypoint.sh fixes ownership of
+    # the bind-mounted /data, then drops to an unprivileged user via gosu).
+    # Only the capabilities that step actually needs are kept.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+    # NOT read_only: entrypoint.sh's usermod/groupmod (renumbering the
+    # "nobody" user to PUID/PGID at startup, while still root) write to
+    # /etc/passwd and /etc/group — part of the root filesystem, not /data.
+    # A read-only root would break every container start. The application
+    # itself (once gosu drops to the unprivileged user) only ever writes
+    # under /data and /tmp (both already separately mounted above), but the
+    # root-phase identity setup needs /etc to stay writable.
