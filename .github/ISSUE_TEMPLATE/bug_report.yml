@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a problem with pdf-dispatch
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in the sections
+        below so the issue can be reproduced. **Do not attach real PDFs or
+        personal data.**
+  - type: input
+    id: version
+    attributes:
+      label: pdf-dispatch version
+      description: Shown in the footer of the web UI, or via `GET /api/runtime` (APP_VERSION).
+      placeholder: "e.g. v1.1.1 or commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Docker host OS / kernel
+      description: Output of `uname -a` on the host (or the NAS model and DSM version).
+      placeholder: "e.g. Synology DS920+, DSM 7.2 / Debian 12, kernel 6.1"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: How can this be reproduced reliably?
+      placeholder: |
+        1. Configure trigger '...'
+        2. Drop a PDF with '...'
+        3. Observe '...'
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Relevant lines from `docker logs pdf-dispatch`. Redact any personal data.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: This report contains no real PDFs or personal data.
+          required: true
