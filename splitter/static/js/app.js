@@ -210,9 +210,21 @@ function escapeHtml(s) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
 }
-// Echappement pour insertion dans une chaine JS entre apostrophes (ex. onclick="f('...')")
+// Escape a value for insertion inside a JS string literal that is itself
+// embedded in an inline HTML handler, e.g. onclick="f('${escapeJsStr(v)}')".
+// Because that markup is injected via innerHTML, the HTML parser decodes
+// entities BEFORE the JS parser runs, so escaping only \ and ' is not enough:
+// a quote or angle bracket could break out of the attribute. We escape the
+// JS-significant characters (backslash, quote) AND the HTML-significant ones
+// (& < > " ') so the value is safe in both contexts simultaneously.
 function escapeJsStr(s) {
-  return String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return String(s ?? '')
+    .replace(/\\/g, '\\\\')   // backslash first
+    .replace(/'/g,  "\\'")    // JS string delimiter
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;');
 }
 
 function toggleSettings() {
