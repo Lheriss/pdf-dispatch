@@ -192,8 +192,12 @@ def _safe_relative_path(path_str: str) -> tuple[bool, str]:
     - No path traversal (../)
     Returns (ok, error_message)
     """
-    # Characters forbidden in folder names
-    FORBIDDEN = r'[<>:"|?*\x00-\x1f\\]'
+    # Characters forbidden in folder names.
+    # The single quote and backtick are included not because they are
+    # invalid on any filesystem, but because folder paths are echoed into
+    # inline HTML event handlers in the frontend; forbidding them here is a
+    # defence-in-depth complement to escapeJsStr() on the client side.
+    FORBIDDEN = r'[<>:"|?*\x00-\x1f\\\'`]'
     if re.search(FORBIDDEN, path_str):
         return False, t("dirs.error_forbidden_chars", path=path_str)
     # Normalise and check for path traversal
