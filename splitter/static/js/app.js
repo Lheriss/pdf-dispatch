@@ -2,47 +2,47 @@
 // pdf-dispatch — frontend
 // =============================================================================
 //
-// Script unique sans dependance externe ni etape de build. Charge par
-// templates/index.html, qui injecte au prealable window.I18N (dictionnaire
-// de traduction de la langue active) et window.LANG (code langue) - voir la
-// fonction t() ci-dessous et la route index() dans app.py.
+// Single script with no external dependency and no build step. Loaded by
+// templates/index.html, which first injects window.I18N (the translation
+// dictionary for the active language) and window.LANG (language code) — see
+// the t() function below and the index() route in app.py.
 //
-// Cycle de vie general :
-//   1. loadConfig() recupere /api/state (config + stats + journal + file
-//      d'attente) et appelle les fonctions de rendu (renderTriggers,
-//      renderOptions, renderTokens, ...) pour peupler la page.
-//   2. refresh() est appelee toutes les 3 secondes (setInterval, derniere
-//      ligne du fichier) pour rafraichir stats/journal/file d'attente sans
-//      recharger toute la config (sauf si cfg n'est pas encore charge).
-//   3. Chaque action utilisateur (toggle, edition, ajout/suppression) appelle
-//      saveSetting()/saveSettingWithLog() qui persiste via POST /api/config
-//      et, pour la seconde, ajoute une entree au journal via POST /api/log
-//      (le message est traduit cote client avec t() avant l'envoi).
+// General lifecycle:
+//   1. loadConfig() fetches /api/state (config + stats + log + queue) and
+//      calls the render functions (renderTriggers, renderOptions,
+//      renderTokens, ...) to populate the page.
+//   2. refresh() runs every 3 seconds (setInterval, last line of the file)
+//      to refresh stats/log/queue without reloading the whole config
+//      (unless cfg has not been loaded yet).
+//   3. Each user action (toggle, edit, add/remove) calls
+//      saveSetting()/saveSettingWithLog(), which persists via POST /api/config
+//      and, for the latter, appends an entry to the log via POST /api/log
+//      (the message is translated client-side with t() before sending).
 //
-// Sections (reperables par les commentaires `// ── ... ──`) :
-//   - State local            : variables globales (cfg, etat des panneaux...)
-//   - Polling                : loadConfig/refresh, boucle setInterval
-//   - Settings panel         : langue, options generales
-//   - Declencheurs           : liste des barcodes/QR codes -> split
-//   - Options                : sous-dossiers, archivage, journal detaille
-//   - Tokens (filename builder) : construction du nom de fichier (drag&drop)
-//   - Separateur global      : generation/telechargement du PDF intercalaire
-//   - Presets timestamp      : raccourcis de format de date
-//   - Tokens string additionnels : textes libres dans le nom de fichier
-//   - Drag & drop tokens     : reordonnancement des tokens
-//   - Upload zone            : depot de fichiers PDF
-//   - Dossiers               : affichage et edition des chemins de sortie
-//   - Email panel            : configurations IMAP (CRUD, test, alertes)
+// Sections (identified by `// ── ... ──` comments):
+//   - Local state            : global variables (cfg, panel state...)
+//   - Polling                : loadConfig/refresh, setInterval loop
+//   - Settings panel         : language, general options
+//   - Triggers               : list of barcodes/QR codes -> split
+//   - Options                : subfolders, archiving, verbose log
+//   - Tokens (filename builder) : filename construction (drag & drop)
+//   - Global separator       : generation/download of the separator PDF
+//   - Timestamp presets      : date format shortcuts
+//   - Additional string tokens : free text in the filename
+//   - Drag & drop tokens     : token reordering
+//   - Upload zone            : PDF file drop
+//   - Folders                : display and editing of output paths
+//   - Email panel            : IMAP configurations (CRUD, test, alerts)
 //
-// IMPORTANT (collision de noms) : t('cle', {...}) est la fonction globale de
-// traduction. Plusieurs fonctions de rendu iterent sur des tableaux d'objets
-// (declencheurs, tokens...) - NE JAMAIS nommer le parametre de map()/forEach()
-// `t` dans une fonction qui appelle aussi t('cle'), sous peine de masquer la
-// fonction de traduction par l'objet courant (TypeError silencieux qui casse
-// le rendu - voir l'historique des releases v1.15.1 pour un cas reel).
+// IMPORTANT (name collision): t('key', {...}) is the global translation
+// function. Several render functions iterate over arrays of objects
+// (triggers, tokens...) — NEVER name a map()/forEach() parameter `t` inside a
+// function that also calls t('key'), otherwise the current object shadows the
+// translation function (a silent TypeError that breaks rendering — see the
+// v1.15.1 release history for a real case).
 // =============================================================================
 
-// ── State local ───────────────────────────────────────────────────────────
+// ── Local state ───────────────────────────────────────────────────────────
 let cfg = {};
 let dragSrc = null;
 let savedTokensHash = null;  // hash of the last saved token config
@@ -168,7 +168,7 @@ async function refresh() {
 }
 
 // ── Settings panel ────────────────────────────────────────────────────────
-// Traduction (i18n) : window.I18N est injecte par le serveur selon la langue active
+// Translation (i18n): window.I18N is injected by the server for the active language
 function t(key, params) {
   let s = (window.I18N && window.I18N[key]) || key;
   if (params) {
@@ -178,7 +178,7 @@ function t(key, params) {
   }
   return s;
 }
-// Applique les traductions a tous les elements portant data-i18n
+// Apply translations to every element carrying data-i18n
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => {
     el.textContent = t(el.dataset.i18n);
@@ -197,7 +197,7 @@ function applyI18n() {
   }
 }
 
-// Echappement HTML pour eviter toute injection via valeurs utilisateur
+// HTML escaping to prevent injection via user-supplied values
 // (noms de fichiers, messages du journal, noms de configurations, etc.)
 async function setLanguage(lang) {
   if (lang === window.LANG) return;
@@ -537,7 +537,7 @@ async function saveSettingWithLog(key, value, logMsg) {
   } catch(e) {
     console.error('saveSettingWithLog error:', e);
   }
-  // Log dans le journal
+  // Write to the activity log
   try {
     await fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({level:'info', message:'⚙ Config : ' + logMsg})});
@@ -556,7 +556,7 @@ function renderTokens() {
     if (tok.type === 'string') {
       fields = `<span class="tl">${t('tokens.value_label')}</span>
         <input type="text" value="${escapeHtml(tok.value||'')}" oninput="updateToken(${i},'value',this.value)" placeholder="${t('tokens.value_placeholder')}">`;
-      // Pas de toggle pour les tokens string : tous supprimables via ✕
+      // No toggle for string tokens: all removable via ✕
     } else if (tok.type === 'timestamp') {
       fields = `<span class="tl">${t('tokens.format_label')}</span>
         <input type="text" id="ts-fmt-${i}" value="${escapeHtml(tok.format||'%Y%m%d-%H%M%S')}" oninput="updateToken(${i},'format',this.value)" style="width:150px">
@@ -570,11 +570,11 @@ function renderTokens() {
           oninput="updateToken(${i},'digits',this.value)"
           onblur="if(parseInt(this.value)<3||parseInt(this.value)>8){this.value=Math.min(8,Math.max(3,parseInt(this.value)||6));updateToken(${i},'digits',parseInt(this.value));this.style.borderColor='';}">`;
     }
-    // Compteur : afficher seulement la plage, pas "obligatoire"
+    // Counter: show only the range, not "required"
     const mandatoryLabel = tok.type === 'counter'
       ? `<span class="tl" style="color:var(--muted)">${t('tokens.digits_range')}</span>`
       : ``;
-    // Tous les tokens STRING sont supprimables via ✕ (pas de toggle)
+    // All STRING tokens are removable via ✕ (no toggle)
     const isString = tok.type === 'string';
     const removeBtn = isString
       ? `<span style="cursor:pointer;color:var(--error);font-size:16px;margin-left:4px" onclick="removeStringToken(${i})" title="${t('tokens.remove_free_text_title')}">✕</span>`
@@ -643,7 +643,7 @@ function updatePreview() {
     .replace('%M', pad(now.getMinutes())).replace('%S', pad(now.getSeconds()));
   const parts = [];
   tokens.forEach(t => {
-    // Les tokens string n'ont pas de toggle : toujours inclus si non vides
+    // String tokens have no toggle: always included when non-empty
     if (t.type !== 'string' && t.enabled === false) return;
     if (t.type==='trigger')   parts.push('NEWDOC');
     if (t.type==='string' && t.value) parts.push(t.value);
@@ -859,7 +859,7 @@ function dragDrop(e, i)  {
 // ── Upload zone ──────────────────────────────────────────────────────────
 function uzDragOver(e) {
   e.preventDefault();
-  // Refuser les dossiers
+  // Reject directories
   if (e.dataTransfer.items) {
     for (const item of e.dataTransfer.items) {
       if (item.webkitGetAsEntry && item.webkitGetAsEntry()?.isDirectory) return;
@@ -974,7 +974,7 @@ async function confirmResetStats() {
 // ── Email panel ───────────────────────────────────────────────────────────
 let activeEmailConfigId = null;
 
-/** Ferme tous les panneaux inline sauf celui indiqué (null = ferme tout). */
+/** Close all inline panels except the given one (null = close everything). */
 function toggleOptionsSection() {
   const body  = document.getElementById('options-body');
   const arrow = document.getElementById('options-arrow');
@@ -1152,7 +1152,7 @@ function _emailSignature(c) {
 
 function updateEmailStatusMessage() {
   // Un seul emplacement de message : priorite aux erreurs de doublon,
-  // sinon avertissement "modifications non enregistrees".
+  // otherwise show an "unsaved changes" warning.
   const w       = document.getElementById('email-unsaved-warning');
   const saveBtn = document.getElementById('em-save-btn');
   if (!activeEmailConfigId) return false;
@@ -1170,7 +1170,7 @@ function updateEmailStatusMessage() {
     return true;
   }
 
-  // 2. Configuration identique (serveur, utilisateur, dossier, filtres)
+  // 2. Identical configuration (server, user, folder, filters)
   const sig = _emailSignature(current);
   const dup = (cfg.email_configs || []).find(c => c.id !== activeEmailConfigId && _emailSignature(c) === sig);
   if (dup) {
@@ -1180,7 +1180,7 @@ function updateEmailStatusMessage() {
     return true;
   }
 
-  // 3. Aucune erreur : avertissement de modification non enregistree, ou rien
+  // 3. No error: unsaved-change warning, or nothing
   saveBtn.disabled = false;
   if (emailUnsaved) {
     w.textContent = t('common.unsaved_warning');
@@ -1234,7 +1234,7 @@ function emailFieldChanged() {
 
 function addEmailConfig() {
   // Create a local draft (not persisted): it will only be saved to the
-  // serveur qu'au clic sur "Enregistrer". Si l'utilisateur ne fait rien,
+  // to the server only when "Save" is clicked. If the user does nothing,
   // server when the user clicks Save. The draft disappears on next refresh.
   const inp  = document.getElementById('new-email-config-name');
   const name = inp.value.trim();
@@ -1305,7 +1305,7 @@ async function saveEmailConfig() {
     if (d.ok) {
       emailUnsaved = false;
       if (isDraft) {
-        // Le brouillon devient une configuration reelle avec l'id du serveur
+        // The draft becomes a real configuration with the server-assigned id
         cfg.email_configs = (cfg.email_configs || []).map(c =>
           c.id === activeEmailConfigId ? d.config : c);
         activeEmailConfigId = d.config.id;
