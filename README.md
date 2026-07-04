@@ -1,6 +1,35 @@
 # pdf-dispatch
 
+[![Release](https://img.shields.io/github/v/release/Lheriss/pdf-dispatch?sort=semver)](https://github.com/Lheriss/pdf-dispatch/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Build](https://github.com/Lheriss/pdf-dispatch/actions/workflows/docker-build.yml/badge.svg)](https://github.com/Lheriss/pdf-dispatch/actions/workflows/docker-build.yml)
+[![Container](https://img.shields.io/badge/ghcr.io-pdf--dispatch-2496ED?logo=docker&logoColor=white)](https://github.com/Lheriss/pdf-dispatch/pkgs/container/pdf-dispatch)
+
 Self-hosted Docker service that splits multi-page PDFs on detection of barcodes or QR codes. A web interface lets you configure everything without restarting the container.
+
+## Screenshots
+
+<!--
+  TODO — add screenshots. Take them from your running instance and place the
+  image files in docs/img/, then uncomment the block below. Recommended shots:
+    1. Main interface (activity log + stats + status)
+    2. Trigger configuration panel
+    3. Email (IMAP) configuration panel
+  A short animated GIF of a PDF being dropped and split is the single most
+  effective addition for a self-hosted project listing.
+-->
+
+<!--
+<p align="center">
+  <img src="docs/img/main-interface.png" alt="pdf-dispatch main interface" width="800"><br>
+  <em>Main interface — real-time activity log, statistics and folder status</em>
+</p>
+
+<p align="center">
+  <img src="docs/img/triggers.png" alt="Trigger configuration" width="800"><br>
+  <em>Trigger configuration — barcodes and QR codes that drive the split</em>
+</p>
+-->
 
 ## Features
 
