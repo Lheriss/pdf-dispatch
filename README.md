@@ -215,21 +215,28 @@ file alongside `docker-compose.yml`.
 
 ---
 
-### Portainer GitOps setup
+### Deploying with Portainer
+
+Create a **Stack** and either paste the contents of `docker-compose.yml`
+(Web editor) or point the stack at this repository (Repository method):
 
 | Field | Value |
 |-------|-------|
-| Repository URL | `https://github.com/lheriss/pdf-dispatch` |
+| Repository URL | `https://github.com/Lheriss/pdf-dispatch` |
 | Repository reference | `refs/heads/main` |
 | Compose path | `docker-compose.yml` |
-| Authentication | Token — your GitHub PAT (`repo` + `read:packages` scopes) |
-| GitOps updates | ✅ Enabled, polling every 1 min |
-| Re-pull image | ✅ Enabled |
-| Force redeployment | ❌ Disabled |
+| Authentication | None — the repository and the image are public |
 
-> **How automatic updates work**: on every push to `main`, GitHub Actions builds and pushes a new image to `ghcr.io`. Portainer polls every minute, detects the new commit, pulls the updated `docker-compose.yml`, then pulls the new image from ghcr.io. If the image digest has changed, the container is restarted automatically — no manual action needed.
->
-> **Why Force redeployment is disabled**: enabling it would restart the container at *every* polling interval (every minute), even when nothing has changed. Keep it disabled — re-pull image alone is sufficient.
+Set your environment variables (`DATA_VOLUME`, `PUID`, `PGID`,
+`EMAIL_SECRET`, …) in the stack's **Environment variables** section.
+
+> **Updating**: pull the new image and redeploy the stack (Portainer:
+> *Recreate* with *Re-pull image* checked). Portainer's automatic GitOps
+> polling also works, but be aware that tracking `main` redeploys your
+> container on **every** upstream commit, including documentation changes.
+> If you prefer explicit upgrades, deploy from the Web editor and update
+> manually when a [new release](https://github.com/Lheriss/pdf-dispatch/releases)
+> is published.
 
 ### Automatically created subfolders
 
