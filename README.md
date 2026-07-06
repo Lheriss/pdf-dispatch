@@ -9,27 +9,25 @@ Self-hosted Docker service that splits multi-page PDFs on detection of barcodes 
 
 ## Screenshots
 
-<!--
-  TODO — add screenshots. Take them from your running instance and place the
-  image files in docs/img/, then uncomment the block below. Recommended shots:
-    1. Main interface (activity log + stats + status)
-    2. Trigger configuration panel
-    3. Email (IMAP) configuration panel
-  A short animated GIF of a PDF being dropped and split is the single most
-  effective addition for a self-hosted project listing.
--->
-
-<!--
 <p align="center">
   <img src="docs/img/main-interface.png" alt="pdf-dispatch main interface" width="800"><br>
-  <em>Main interface — real-time activity log, statistics and folder status</em>
+  <em>Main interface — drag-and-drop upload zone, live statistics and activity log</em>
 </p>
 
 <p align="center">
-  <img src="docs/img/triggers.png" alt="Trigger configuration" width="800"><br>
-  <em>Trigger configuration — barcodes and QR codes that drive the split</em>
+  <img src="docs/img/triggers.png" alt="Split trigger and filename configuration" width="800"><br>
+  <em>Split triggers and filename builder — drag tokens to compose output names, with a live preview</em>
 </p>
--->
+
+<p align="center">
+  <img src="docs/img/options.png" alt="Options panel" width="800"><br>
+  <em>Options — separator placement, per-trigger subfolders, source archiving, and the configuration sub-panels</em>
+</p>
+
+<p align="center">
+  <img src="docs/img/email.png" alt="Email (IMAP) polling configuration" width="800"><br>
+  <em>Email input — poll an IMAP mailbox for PDF attachments, with sender/subject filters and TLS control</em>
+</p>
 
 ## Features
 
