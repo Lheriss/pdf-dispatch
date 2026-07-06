@@ -806,33 +806,31 @@ pdf-dispatch/
         └── js/app.js       ← all frontend logic (no build step, no dependencies)
 ```
 
-### `splitter/app.py` — section map
+### `splitter/dispatch/` — module map
 
-Single file (~3500 lines), sections marked by `# --- ... ---` comments:
+`app.py` is a thin entry point (~120 lines): it calls `create_app()` and
+re-exports symbols for the test suite. The application logic lives in the
+`dispatch/` package:
 
-| Section | Content |
-|---------|---------|
-| Base paths | Environment variable reading, working folder paths |
-| i18n | Loading `fr.json`/`en.json`, `t(key, **kwargs)` function |
-| Persistent configuration | `load_config`, `save_config`, defaults, validation |
-| Email password encryption | Fernet/AES, `EMAIL_SECRET` key derivation |
-| Shared state | Statistics, processing queue, in-memory activity log |
-| Task tracking | `_tasks` OrderedDict, `_task_create`, `_task_update` |
-| Per-file config overrides | `_file_config_overrides`, `_store_file_override`, `_pop_file_override` |
-| Post-processing hook | `_run_post_process_hook` — subprocess execution after each file |
-| Outbound webhook | `_fire_webhook`, `_deliver_webhook` — async HTTP POST with HMAC |
-| Filename construction | Token validation, `build_filename` |
-| Folders | Output path resolution, per-trigger subfolders |
-| File stabilisation | Wait for write completion before processing |
-| Code detection | ZXing/pyzbar, barcode matching against trigger list |
-| PDF metadata | Writing metadata onto produced files |
-| Separator page generation | QR/Code128 separator PDF generation |
-| IMAP retrieval | Polling, filters, duplicate tracking, attachment download |
-| Main processing | `process_file` — complete pipeline |
-| Monitor | `watchdog.Observer` on `/data/input/`, startup scan |
-| Flask | App init, `before_request` auth (Basic + API key) |
-| API routes | All `/api/...` endpoints |
-| OpenAPI routes | `/api/openapi.json`, `/api/openapi.yaml`, `/api/docs` |
+| Module | Responsibility |
+|--------|----------------|
+| `__init__.py` | `create_app()` — Flask Application Factory: request-size cap, 413 handler, auth logging, Blueprint registration |
+| `config.py` | Environment constants, persistent config (`load_config` / `save_config` / `get_config` / `update_config`), path helpers, trigger matching, document counter, statistics |
+| `crypto.py` | Fernet/AES password encryption; `EMAIL_SECRET` → SHA-256 key derivation |
+| `i18n.py` | Loads `fr.json` / `en.json`; `t(key, **kwargs)` with cascade fallback |
+| `state.py` | In-memory shared state: locks, processing semaphore, activity log, async task store, per-file config overrides |
+| `hook.py` | `_run_post_process_hook` — runs `POST_PROCESS_SCRIPT` after each file |
+| `webhook.py` | SSRF guard, payload builder, async HMAC-signed delivery with retries |
+| `processing.py` | Full PDF pipeline: filename construction, folder routing, file stabilisation, two-pass barcode scan, split/write, metadata, separator generation, `process_file` |
+| `email_poller.py` | Background IMAP thread: polling, filters, attachment download, Message-ID deduplication, retention limits |
+| `watcher.py` | `watchdog.Observer` on `/data/input/`, processing thread pool, startup scan and banner |
+| `routes/auth.py` | `before_app_request` hook: X-API-Key then HTTP Basic auth |
+| `routes/docs.py` | `/healthz`, `/api/runtime`, `/api/openapi.*`, `/api/docs` |
+| `routes/core.py` | `/api/state`, `/api/config`, `/api/log`, `/api/dirs/*`, `/api/recent`, `/api/stats/reset` |
+| `routes/upload.py` | `/api/upload`, `/api/tasks`, `/api/file/<path>` |
+| `routes/email_routes.py` | `/api/email/configs` CRUD, `/api/email/test`, `/api/email/reset_ids/<id>` |
+| `routes/separator.py` | `/api/separator/<idx>` — printable separator PDF |
+| `routes/webhook_routes.py` | `/api/webhook/test` |
 
 ### Frontend
 
