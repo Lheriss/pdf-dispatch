@@ -38,7 +38,7 @@ log = logging.getLogger("pdf-dispatch")
 
 # Single root folder mounted via docker-compose
 DATA_DIR    = Path(os.getenv("DATA_DIR",    "/data"))
-APP_VERSION = os.getenv("APP_VERSION", "unknown").strip()  # injecté au build via ARG GIT_SHA → ENV APP_VERSION dans Dockerfile
+APP_VERSION = os.getenv("APP_VERSION", "unknown").strip()  # injected at build time via ARG GIT_SHA → ENV APP_VERSION in the Dockerfile (release tag or `git describe` dev version)
 
 # Characters forbidden in file/folder names
 FORBIDDEN_CHARS = '[<>:"/\\|?*\\x00-\\x1f]'
