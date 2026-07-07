@@ -66,6 +66,13 @@ jobs:
 
       # ── Docker ───────────────────────────────────────────────────────────
 
+      # QEMU provides CPU emulation so Buildx can build the linux/arm64 image
+      # on the amd64 runner. All Python dependencies ship aarch64 wheels or
+      # are pure Python, so no compilation happens under emulation and the
+      # arm64 build stays fast.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -95,22 +102,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      # Two-stage build strategy:
+      #   1. Build amd64 only, loaded into the local Docker daemon, so the
+      #      smoke test below can actually run the container (`load: true`
+      #      does not support multi-platform manifest lists).
+      #   2. After the smoke test passes, build the multi-platform image and
+      #      push it. The GHA cache makes stage 2 reuse all amd64 layers from
+      #      stage 1, so only the arm64 layers are built there.
+      - name: Build image (amd64, local) for smoke test
         uses: docker/build-push-action@v7
         with:
           context: .
-          push: ${{ github.event_name == 'push' }}
-          # load: true — charge l'image dans le daemon Docker local quel que
-          # soit push. Indispensable pour le smoke test ci-dessous : sur les
-          # PRs (push=false, ex. Dependabot), l'image construite par Buildx ne
-          # vivait jusqu'ici que dans le cache BuildKit — `docker run` échouait
-          # instantanément (image introuvable, ni localement ni sur le
-          # registre). Supporté simultanément avec push (build une fois,
-          # exporte vers les deux destinations).
+          platforms: linux/amd64
+          push: false
           load: true
           tags: |
             ${{ steps.image.outputs.name }}:latest
-            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
           build-args: |
             GIT_SHA=${{ steps.version.outputs.version }}
           cache-from: type=gha
@@ -126,3 +133,18 @@ jobs:
           sleep 15
           curl -f http://localhost:5000/healthz
           docker stop test-splitter
+
+      - name: Build and push multi-platform image (amd64 + arm64)
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
+          build-args: |
+            GIT_SHA=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
