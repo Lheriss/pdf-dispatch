@@ -3,6 +3,9 @@ name: Build, test & publish
 on:
   push:
     branches: [ main ]
+    # Building on tag push means `git describe` resolves to the exact tag
+    # (e.g. v1.2.0), so released images display a clean version string.
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
 
