@@ -20,7 +20,6 @@ COPY splitter/app.py .
 COPY splitter/dispatch ./dispatch
 COPY splitter/openapi.yaml ./openapi.yaml
 COPY splitter/openapi.json ./openapi.json
-COPY splitter/dispatch ./dispatch
 COPY splitter/i18n ./i18n
 COPY splitter/templates ./templates
 COPY splitter/static ./static
