@@ -17,6 +17,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history + tags so `git describe` can compute the version
+          fetch-depth: 0
+
+      - name: Compute version string
+        id: version
+        # git describe --tags --always yields:
+        #   v1.1.1               on a tagged release commit
+        #   v1.1.1-3-g58121e5    3 commits after the v1.1.1 tag (dev build)
+        #   58121e5              short SHA if no tag exists yet
+        run: echo "version=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -98,7 +109,7 @@ jobs:
             ${{ steps.image.outputs.name }}:latest
             ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
           build-args: |
-            GIT_SHA=${{ github.sha }}
+            GIT_SHA=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
