@@ -277,6 +277,62 @@ def decode_page(img):
     return decode_zxing(img) if SCANNER == "ZXING" else decode_pyzbar(img)
 
 
+# ---------------------------------------------------------------------------
+# Detailed code detection (value + symbology + position) — used by the
+# /api/detect diagnostic endpoint. Kept separate from decode_page so the
+# production splitting path stays untouched.
+# ---------------------------------------------------------------------------
+
+def _decode_detailed_zxing(img) -> list[dict]:
+    """Like decode_zxing but returns dicts with value, symbology type and
+    bounding box (pixels, in the coordinate space of `img`)."""
+    try:
+        import zxingcpp, numpy as np
+    except ImportError:
+        return _decode_detailed_pyzbar(img)
+    out = []
+    for r in zxingcpp.read_barcodes(np.array(img)):
+        try:
+            pts = [r.position.top_left, r.position.top_right,
+                   r.position.bottom_right, r.position.bottom_left]
+            xs, ys = [p.x for p in pts], [p.y for p in pts]
+            bbox = {"x": min(xs), "y": min(ys),
+                    "w": max(xs) - min(xs), "h": max(ys) - min(ys)}
+        except Exception:
+            bbox = None
+        out.append({
+            "value": r.text,
+            "type":  str(r.format).split(".")[-1],   # e.g. QRCode, Code128
+            "bbox":  bbox,
+        })
+    return out
+
+
+def _decode_detailed_pyzbar(img) -> list[dict]:
+    """Like decode_pyzbar but returns dicts with value, symbology type and
+    bounding box (pixels, in the coordinate space of `img`)."""
+    from pyzbar.pyzbar import decode as _d
+    out = []
+    for r in _d(img):
+        try:
+            bbox = {"x": r.rect.left, "y": r.rect.top,
+                    "w": r.rect.width, "h": r.rect.height}
+        except Exception:
+            bbox = None
+        out.append({
+            "value": r.data.decode("utf-8", errors="replace"),
+            "type":  getattr(r, "type", "unknown"),
+            "bbox":  bbox,
+        })
+    return out
+
+
+def decode_page_detailed(img) -> list[dict]:
+    """Detailed variant of decode_page: list of {value, type, bbox} dicts."""
+    return (_decode_detailed_zxing(img) if SCANNER == "ZXING"
+            else _decode_detailed_pyzbar(img))
+
+
 def find_split_pages(pdf_path: Path, trigger_map: list,
                      separator_placement: str = "before") -> list[dict]:
     """Two-pass barcode scan for efficient processing of multi-page PDFs.

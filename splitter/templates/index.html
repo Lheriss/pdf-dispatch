@@ -81,6 +81,29 @@
 
 </div>
 
+<!-- Detection test -->
+<div class="settings" style="margin-top:14px">
+  <div class="settings-header" onclick="toggleDetectPanel()">
+    <span>🔎 <span data-i18n="detect.title">Detection test</span></span>
+    <span class="settings-arrow" id="detect-arrow">▼</span>
+  </div>
+  <div class="settings-body" id="detect-body">
+    <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:10px"
+         data-i18n="detect.hint">Drop a test page to see which codes are detected and whether they match a trigger — the file is analysed only, never processed.</div>
+    <div class="upload-zone" id="detect-zone" style="min-height:90px"
+      ondragover="dtDragOver(event)" ondragleave="dtDragLeave(event)" ondrop="dtDrop(event)"
+      onclick="document.getElementById('detect-input').click()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35" stroke-linecap="round"/>
+      </svg>
+      <span class="uz-title" data-i18n="detect.drag_drop">Drop a test page (PDF)</span>
+      <span class="uz-sub" data-i18n="detect.or_click">or click to browse</span>
+      <input type="file" id="detect-input" accept=".pdf" style="display:none" onchange="dtFiles(this.files)">
+    </div>
+    <div id="detect-results" style="margin-top:12px"></div>
+  </div>
+</div>
+
 <!-- Blocked email retrieval alert -->
 <div class="email-alert" id="email-alert">
   <span>⛔</span>

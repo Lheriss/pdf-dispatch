@@ -81,6 +81,7 @@ def create_app() -> Flask:
     from dispatch.routes.upload         import bp as upload_bp
     from dispatch.routes.separator      import bp as separator_bp
     from dispatch.routes.webhook_routes import bp as webhook_bp
+    from dispatch.routes.detect         import bp as detect_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(docs_bp)
@@ -89,5 +90,6 @@ def create_app() -> Flask:
     app.register_blueprint(upload_bp)
     app.register_blueprint(separator_bp)
     app.register_blueprint(webhook_bp)
+    app.register_blueprint(detect_bp)
 
     return app

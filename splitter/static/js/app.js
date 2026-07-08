@@ -915,8 +915,98 @@ async function uzSend(files) {
   }
 }
 
-// ── Dossiers ──────────────────────────────────────────────────────────────
-const DIR_LABELS = () => ({input: '📂 ' + t('dirs.label_input'), output: '📁 ' + t('dirs.label_output'), no_code: '🔍 ' + t('dirs.label_no_code'), error: '⚠️ ' + t('dirs.label_error'), processed: '✅ ' + t('dirs.label_processed')});
+// ── Detection test panel ──────────────────────────────────────────────────
+function toggleDetectPanel() {
+  const b = document.getElementById('detect-body');
+  const a = document.getElementById('detect-arrow');
+  const open = b.classList.toggle('open');
+  a.textContent = open ? '▲' : '▼';
+}
+function dtDragOver(e) {
+  e.preventDefault();
+  document.getElementById('detect-zone').classList.add('dragover');
+}
+function dtDragLeave(e) { document.getElementById('detect-zone').classList.remove('dragover'); }
+function dtDrop(e) {
+  e.preventDefault();
+  document.getElementById('detect-zone').classList.remove('dragover');
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f && f.name.toLowerCase().endsWith('.pdf')) dtSend(f);
+}
+function dtFiles(fileList) {
+  const f = fileList && fileList[0];
+  if (f && f.name.toLowerCase().endsWith('.pdf')) dtSend(f);
+  document.getElementById('detect-input').value = '';
+}
+async function dtSend(file) {
+  const box = document.getElementById('detect-results');
+  box.innerHTML = `<div style="font-family:var(--mono);font-size:11px;color:var(--muted)">${t('detect.analyzing', {filename: escapeHtml(file.name)})}</div>`;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('/api/detect', {method: 'POST', body: fd});
+    const d = await r.json();
+    if (!d.ok) {
+      box.innerHTML = `<div style="font-family:var(--mono);font-size:11px;color:var(--error)">${escapeHtml(d.error || 'error')}</div>`;
+      return;
+    }
+    dtRender(d, box);
+  } catch (e) {
+    box.innerHTML = `<div style="font-family:var(--mono);font-size:11px;color:var(--error)">${escapeHtml(e.message)}</div>`;
+  }
+}
+function dtRender(d, box) {
+  const mono = 'font-family:var(--mono);font-size:11px;';
+  let html = `<div style="${mono}color:var(--muted);margin-bottom:8px">` +
+    escapeHtml(t('detect.env', {scanner: d.scanner, dpi_scan: d.dpi_scan,
+                                dpi: d.dpi, upscale: d.upscale})) + '</div>';
+  if (d.permissive) {
+    html += `<div style="${mono}color:var(--warn);margin-bottom:8px">${t('detect.permissive_note')}</div>`;
+  }
+  if (d.truncated) {
+    html += `<div style="${mono}color:var(--warn);margin-bottom:8px">` +
+      escapeHtml(t('detect.truncated', {analyzed: d.pages_analyzed, total: d.pages_total})) + '</div>';
+  }
+  for (const p of d.pages) {
+    html += `<div style="${mono}color:var(--text);margin:10px 0 4px;letter-spacing:.05em">` +
+      escapeHtml(t('detect.page', {page: p.page})) + '</div>';
+    if (!p.codes.length) {
+      html += `<div style="${mono}color:var(--muted);padding-left:12px">— ${t('detect.no_codes')}</div>`;
+      continue;
+    }
+    for (const c of p.codes) {
+      const pos = c.bbox
+        ? `x${c.bbox.x} y${c.bbox.y} · ${c.bbox.w}×${c.bbox.h}px`
+        : '—';
+      const prodColor = c.production_detected ? 'var(--accent)' : 'var(--error)';
+      const prodLabel = c.production_detected ? t('detect.prod_ok') : t('detect.prod_ko');
+      let matchHtml;
+      if (c.matches.length) {
+        matchHtml = c.matches.map(m =>
+          `<span style="color:var(--accent)">«${escapeHtml(m.pattern)}»</span>` +
+          `<span style="color:var(--muted)"> ${m.is_glob ? 'glob · ' : ''}${escapeHtml(m.page_handling)} → ${escapeHtml(m.effective)}</span>`
+        ).join('<br>');
+      } else {
+        matchHtml = `<span style="color:var(--warn)">${t('detect.match_none')}</span>`;
+      }
+      const splitBadge = c.would_split
+        ? `<span style="color:var(--accent)">✓ ${t('detect.would_split')}</span>`
+        : `<span style="color:var(--muted)">✗ ${t('detect.no_split')}</span>`;
+      html += `<div style="${mono}padding:6px 12px;margin:4px 0;background:var(--surface2);border-left:2px solid ${prodColor};border-radius:2px">
+        <div><span style="color:var(--text)">${escapeHtml(c.value)}</span>
+             <span style="color:var(--muted)"> · ${escapeHtml(c.type)} · ${escapeHtml(pos)}</span></div>
+        <div style="margin-top:2px;color:${prodColor}">${prodLabel}</div>
+        ${!c.at_scan_dpi && c.at_full_dpi
+          ? `<div style="margin-top:2px;color:var(--warn)">${escapeHtml(t('detect.scan_gate_warning', {dpi: d.dpi, dpi_scan: d.dpi_scan}))}</div>` : ''}
+        <div style="margin-top:2px">${matchHtml}</div>
+        <div style="margin-top:2px">${splitBadge}</div>
+      </div>`;
+    }
+  }
+  box.innerHTML = html;
+}
+
+// ── Dossiers ──────────────────────────────────────────────────────────────const DIR_LABELS = () => ({input: '📂 ' + t('dirs.label_input'), output: '📁 ' + t('dirs.label_output'), no_code: '🔍 ' + t('dirs.label_no_code'), error: '⚠️ ' + t('dirs.label_error'), processed: '✅ ' + t('dirs.label_processed')});
 const DIR_ORDER  = ['input', 'output', 'no_code', 'error', 'processed'];
 let activeDirKey = null;
 
