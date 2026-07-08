@@ -845,7 +845,12 @@ def process_file(pdf_path: Path):
                 pending_pat  = NO_CODE_TRIGGER
 
             # "start" / "delete" hits: close preceding segment, start a new one
-            for hit in [h for h in hits if h.get("page_handling", "start") != "end"]:
+            # ("end" and "end_delete" hits are fully handled by the two loops
+            #  above and must not be processed a second time here — otherwise
+            #  the following segment inherits the trigger name instead of
+            #  falling back to no_code.)
+            for hit in [h for h in hits
+                        if h.get("page_handling", "start") not in ("end", "end_delete")]:
                 H = hit.get("page_handling", "start")
                 # Flush content up to P-1 (exclusive of trigger page)
                 _flush(P, pending_name, pending_pat,
