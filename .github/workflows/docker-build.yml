@@ -2,12 +2,12 @@ name: Build, test & publish
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
     # Building on tag push means `git describe` resolves to the exact tag
     # (e.g. v1.2.0), so released images display a clean version string.
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
 
 permissions:
   contents: read
@@ -64,7 +64,7 @@ jobs:
       - name: JS functional tests
         run: node tests/test_js_functional.js
 
-      # ── Docker ───────────────────────────────────────────────────────────
+      # -- Docker ------------------------------------------------------------
 
       # QEMU provides CPU emulation so Buildx can build the linux/arm64 image
       # on the amd64 runner. All Python dependencies ship aarch64 wheels or
@@ -79,11 +79,17 @@ jobs:
       # Docker requires image names to be lowercase.
       # github.repository_owner may be mixed-case, so we normalise it.
       #
-      # The secondary tag uses the short commit SHA rather than a manually
-      # maintained version number: it is the same source of truth as
-      # APP_VERSION (injected into the image via ARG GIT_SHA, exposed by
-      # /api/runtime). No separate file to keep in sync, and every build
-      # gets a unique, traceable tag.
+      # Tagging strategy (see also the "Compute publish tags" step below):
+      #   push to main      -> :latest  + :<sha8>
+      #   push to dev       -> :dev     + :<sha8>
+      #   push of a v* tag  -> :latest  + :vX.Y.Z + :<sha8>
+      #   pull request      -> no publish (build + smoke test only)
+      #
+      # The <sha8> tag is always published on any push: it is a unique,
+      # traceable handle for every image, matching APP_VERSION (injected via
+      # ARG GIT_SHA and exposed by /api/runtime). :latest and :vX.Y.Z are
+      # reserved for the stable branch and releases, so a dev push can never
+      # be mistaken for a stable image.
       - name: Normalise image name (lowercase owner)
         id: image
         run: |
@@ -93,6 +99,29 @@ jobs:
           echo "name=ghcr.io/${OWNER}/pdf-dispatch" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Image: ghcr.io/${OWNER}/pdf-dispatch  Version: ${VERSION}"
+
+      # Compute the list of tags to publish based on the triggering ref.
+      # Emitted as a newline-separated multiline output consumed by the
+      # final build-push step. The short-SHA tag is included in every case.
+      - name: Compute publish tags
+        id: tags
+        run: |
+          IMG="${{ steps.image.outputs.name }}"
+          SHA="${{ steps.image.outputs.version }}"
+          {
+            echo "list<<EOF"
+            echo "${IMG}:${SHA}"
+            if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+              # Release: v* tag push -> stable + exact version
+              echo "${IMG}:latest"
+              echo "${IMG}:${GITHUB_REF_NAME}"
+            elif [ "${GITHUB_REF_NAME}" = "main" ]; then
+              echo "${IMG}:latest"
+            elif [ "${GITHUB_REF_NAME}" = "dev" ]; then
+              echo "${IMG}:dev"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push'
@@ -117,19 +146,19 @@ jobs:
           push: false
           load: true
           tags: |
-            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:smoke-test
           build-args: |
             GIT_SHA=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Smoke test — container starts and healthz responds
+      - name: Smoke test - container starts and healthz responds
         run: |
           docker run -d --name test-splitter \
             -p 5000:5000 \
             -e DATA_DIR=/data \
             -e APP_VERSION="ci" \
-            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:smoke-test
           sleep 15
           curl -f http://localhost:5000/healthz
           docker stop test-splitter
@@ -141,9 +170,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ steps.image.outputs.name }}:latest
-            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
+          tags: ${{ steps.tags.outputs.list }}
           build-args: |
             GIT_SHA=${{ steps.version.outputs.version }}
           cache-from: type=gha
