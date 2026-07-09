@@ -175,6 +175,7 @@
   "log.page_split": "  Page {page} : fractionnement → «{code}»{glob_info}{del_info}",
   "log.processing": "Traitement : {filename}",
   "log.reason_invalid_pdf": "fichier invalide ou corrompu",
+  "log.reserved_code_value": "Le code scanné «{code}» entre en conflit avec une valeur réservée ; utilisation de «{safe}» pour le nommage",
   "log.retention_cleaned": "Rétention : {count} fichier(s) supprimé(s) dans /{folder} plus vieux que {days}j ({mb} Mo libérés)",
   "log.retention_cycle_failed": "Rétention : échec du cycle de nettoyage : {message}",
   "log.retention_delete_failed": "Rétention : suppression impossible de {path} : {message}",

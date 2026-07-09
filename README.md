@@ -360,6 +360,8 @@ Detection is designed for real scans, not just pristine PDFs: it measures the fr
 
 **Consecutive blanks are grouped**: the back side of a duplex-scanned separator (two blank pages in a row) produces a single split, not two.
 
+> **Reserved value `blank`.** You cannot create a trigger whose value is `blank` (it is rejected on save). If a real barcode happens to encode the literal text `blank` — or `no_code` — and is matched by a trigger (including a glob such as `*`), it is still split on normally, but its filename token is written as `code_blank` (resp. `code_no_code`) so it can't be confused with a blank-page separator. Real separators keep the `blank` value.
+
 > **Calibrating the threshold.** The **Detection test panel** reports each page's `ink_ratio`, page mean, and whether it would be treated as blank at the current threshold. Drop a representative scan (including a real separator sheet and your lightest content page) to pick a threshold that cleanly separates them before enabling the feature in production. A page with very little content (e.g. only a page number) has a low `ink_ratio` and may be read as blank — raise the threshold if that is a concern for your documents.
 
 ### Options

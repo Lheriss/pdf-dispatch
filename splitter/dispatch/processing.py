@@ -43,7 +43,7 @@ from dispatch.config import (
     MAX_UPLOAD_MB, MAX_WORKER_THREADS, MAX_PAGES,
     OUTPUT_DIR, PROCESSED_DIR, SCANNER, UPSCALE,
     BLANK_PAGE_SPLIT, BLANK_PAGE_THRESHOLD, BLANK_PAGE_OFFSET,
-    BLANK_PAGE_LR_MARGIN, BLANK_PAGE_TB_MARGIN,
+    BLANK_PAGE_LR_MARGIN, BLANK_PAGE_TB_MARGIN, RESERVED_TRIGGER_VALUES,
     _is_glob_pattern, _match_trigger, _save_stats,
     get_config, get_dirs, log, next_counter, update_config,
     update_dir_paths,
@@ -345,6 +345,17 @@ def decode_page_detailed(img) -> list[dict]:
 BLANK_TRIGGER = "blank"
 
 
+def _safe_code_value(code: str) -> str:
+    """Disambiguate a real scanned code whose value collides with a reserved
+    routing label (no_code / blank). Returns the value to use downstream for
+    naming/routing: unchanged normally, or prefixed ("code_blank") when it
+    would otherwise be indistinguishable from the internal reserved case.
+    The match itself is unaffected — only the stored value is made safe."""
+    if code.strip().lower() in RESERVED_TRIGGER_VALUES:
+        return f"code_{code}"
+    return code
+
+
 def blank_page_metrics(img,
                        offset: int = None,
                        lr_margin: float = None,
@@ -490,9 +501,14 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
             if not trigger_map:
                 # Permissive mode: every code triggers a split (one hit per page)
                 if not page_matches:
+                    safe = _safe_code_value(code)
+                    if safe != code:
+                        log_event("info",
+                                  t("log.reserved_code_value", code=code, safe=safe),
+                                  pdf_path.name, verbose=True)
                     page_matches.append({
-                        "value":           code,
-                        "matched_pattern": code,
+                        "value":           safe,
+                        "matched_pattern": safe,
                         "page_handling":   "keep",
                     })
             else:
@@ -508,8 +524,21 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
                                   t("log.page_split", page=i + 1, code=code,
                                     glob_info=glob_info, del_info=del_info),
                                   pdf_path.name, verbose=True)
+                        # Disambiguate a real code whose value collides with a
+                        # reserved routing label (e.g. a barcode literally
+                        # encoding "blank", possibly matched by a glob like *).
+                        # Without this its filename token would be "blank",
+                        # indistinguishable from a blank-page separator. The
+                        # match still stands; only the value used downstream is
+                        # made unambiguous.
+                        safe_value = _safe_code_value(code)
+                        if safe_value != code:
+                            log_event("info",
+                                      t("log.reserved_code_value",
+                                        code=code, safe=safe_value),
+                                      pdf_path.name, verbose=True)
                         page_matches.append({
-                            "value":           code,
+                            "value":           safe_value,
                             "matched_pattern": pattern,
                             "page_handling":   page_handling,
                         })

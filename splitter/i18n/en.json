@@ -175,6 +175,7 @@
   "log.page_split": "  Page {page}: split → «{code}»{glob_info}{del_info}",
   "log.processing": "Processing: {filename}",
   "log.reason_invalid_pdf": "invalid or corrupted file",
+  "log.reserved_code_value": "Scanned code «{code}» collides with a reserved value; using «{safe}» for naming",
   "log.retention_cleaned": "Retention: removed {count} file(s) from /{folder} older than {days}d ({mb} MB freed)",
   "log.retention_cycle_failed": "Retention: cleanup cycle failed: {message}",
   "log.retention_delete_failed": "Retention: could not delete {path}: {message}",
