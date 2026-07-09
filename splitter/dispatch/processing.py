@@ -340,7 +340,8 @@ def decode_page_detailed(img) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Reserved trigger value for a blank separator page. Behaves like a normal
 # trigger value downstream (filename token, output/<trigger>/ subfolder when
-# subdirs_by_trigger is on), mirroring NO_CODE_TRIGGER.
+# subdirs_by_trigger is on), mirroring NO_CODE_TRIGGER. Must stay in sync with
+# config.RESERVED_TRIGGER_VALUES, which rejects user triggers using this value.
 BLANK_TRIGGER = "blank"
 
 

@@ -281,6 +281,7 @@
   "triggers.log_renamed": "Trigger renamed: «{old}» → «{new}»",
   "triggers.log_updated": "Trigger «{value}» updated",
   "triggers.panel_title_prefix": "⚙ Configuration —",
+  "triggers.reserved_value": "«{value}» is a reserved value and cannot be used as a trigger.",
   "triggers.section_title": "Split triggers",
   "upload.drag_drop": "Drag and drop your PDFs",
   "upload.error_empty_filename": "Empty filename, skipped",

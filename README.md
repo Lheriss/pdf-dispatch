@@ -769,6 +769,7 @@ npx @openapitools/openapi-generator-cli generate \
 - **IMAP field validation** — `host`, `username`, and `folder` reject CRLF characters (`\r`, `\n`) to prevent IMAP injection. `port` is validated to `1–65535` and `poll_interval` must be ≥ 1.
 - **`password_enc`** is never returned by any API endpoint — the encrypted field is stripped before serialisation.
 - **`POST /api/config`** rejects attempts to overwrite internal-only keys (`email_configs`, `stats`, `counter`) and validates folder paths before applying.
+- **Reserved trigger values** — a trigger whose value equals a reserved routing label (`no_code`, `blank`, case-insensitive) is rejected on save. Such a value would collide with the internal output routing (a real code could not be told apart from the no-code or blank-separator case). Enforced server-side in config validation; the UI also blocks it on entry.
 - **Activity log** — control characters in messages posted via `/api/log` are sanitised (replaced with spaces) to prevent log injection and terminal escape sequences.
 - **Webhook URL sanitisation** — `webhook_url` and `webhook_secret` are stripped of CR (`\r`) and LF (`\n`) characters on every config update to prevent HTTP header injection. A value such as `"\r\nX-Inject: bad"` is stored and delivered as `"X-Inject: bad"` (CRLF prefix removed).
 - **`/api/recent?n=`** — non-integer values return HTTP 400 instead of 500.

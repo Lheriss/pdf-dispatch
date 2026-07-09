@@ -43,6 +43,16 @@ APP_VERSION = os.getenv("APP_VERSION", "unknown").strip()  # injected at build t
 # Characters forbidden in file/folder names
 FORBIDDEN_CHARS = '[<>:"/\\|?*\\x00-\\x1f]'
 
+# Reserved trigger values — synthetic routing labels used internally for
+# special output folders, not real barcode/QR values:
+#   "no_code" — files where no trigger code was found
+#   "blank"   — blank-page separators (office-copier style splitting)
+# A user-defined trigger must never equal one of these: a real code with
+# that value would be indistinguishable from the internal case downstream
+# (same output/<value>/ subfolder, same filename token, ambiguous logs).
+# Comparison is case-insensitive so "Blank", "BLANK", etc. are rejected too.
+RESERVED_TRIGGER_VALUES = ("no_code", "blank")
+
 # Effective paths are read from persistent config
 # These variables are updated dynamically via get_dirs()
 INPUT_DIR     = DATA_DIR / "input"
@@ -333,6 +343,7 @@ def _validate_and_sanitize_config(cfg: dict) -> dict:
             san_dirs[k] = c
         cfg["dirs"] = san_dirs
 
+    _clean_split_values = []
     for sv in cfg.get("split_values", []):
         if isinstance(sv, dict) and "value" in sv:
             v = str(sv["value"])
@@ -340,12 +351,24 @@ def _validate_and_sanitize_config(cfg: dict) -> dict:
             if c != v:
                 issues.append("Control characters in trigger value -> stripped")
                 sv["value"] = c
+                v = c
+            # Reject triggers whose value collides with a reserved routing
+            # label (case-insensitive). Such a code would be indistinguishable
+            # from the internal no_code / blank cases downstream.
+            if v.strip().lower() in RESERVED_TRIGGER_VALUES:
+                issues.append(
+                    f"Trigger value '{v}' is reserved "
+                    f"({', '.join(RESERVED_TRIGGER_VALUES)}) -> removed")
+                continue  # drop this trigger entirely
             sv.setdefault("page_handling", "keep")
             if sv["page_handling"] not in ("keep", "delete"):
                 issues.append(f"page_handling '{sv['page_handling']}' invalid → 'keep'")
                 sv["page_handling"] = "keep"
             if not isinstance(sv.get("case_sensitive"), bool):
                 sv["case_sensitive"] = True
+        _clean_split_values.append(sv)
+    if "split_values" in cfg:
+        cfg["split_values"] = _clean_split_values
 
     if cfg.get("separator_placement") not in ("before", "after"):
         if "separator_placement" in cfg:

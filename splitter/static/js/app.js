@@ -305,10 +305,20 @@ function openTriggerPanel(i) {
   updateSeparatorBtn();
 }
 
+// Reserved routing labels — must mirror config.RESERVED_TRIGGER_VALUES on
+// the server, which also rejects these (defence in depth). A trigger equal to
+// one of these (case-insensitive) would collide with the internal no_code /
+// blank output routing.
+const RESERVED_TRIGGER_VALUES = ['no_code', 'blank'];
+
 function addTrigger() {
   const inp = document.getElementById('new-trigger');
   const val = inp.value.trim();
   if (!val) return;
+  if (RESERVED_TRIGGER_VALUES.includes(val.toLowerCase())) {
+    alert(t('triggers.reserved_value', {value: val}));
+    return;
+  }
   const existing = (cfg.split_values || []).map(tok => typeof tok==='object'?tok.value:tok);
   if (!existing.includes(val)) {
     const newTrigger = {value: val, page_handling: 'keep', case_sensitive: true};

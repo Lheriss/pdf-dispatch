@@ -281,6 +281,7 @@
   "triggers.log_renamed": "Déclencheur renommé : «{old}» → «{new}»",
   "triggers.log_updated": "Déclencheur «{value}» mis à jour",
   "triggers.panel_title_prefix": "⚙ Configuration —",
+  "triggers.reserved_value": "«{value}» est une valeur réservée et ne peut pas être utilisée comme déclencheur.",
   "triggers.section_title": "Déclencheurs de fractionnement",
   "upload.drag_drop": "Glisser-déposer vos PDFs",
   "upload.error_empty_filename": "Nom de fichier vide, ignoré",

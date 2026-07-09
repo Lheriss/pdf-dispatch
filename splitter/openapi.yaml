@@ -362,6 +362,13 @@ paths:
         // Set separator placement
         {"separator_placement": "after"}
         ```
+
+        Validation: the config is sanitised before it is saved. Triggers
+        whose value equals a reserved routing label (`no_code`, `blank`,
+        case-insensitive) are dropped, since such a value would collide with
+        the internal output routing. Other sanitisation includes stripping
+        control characters from trigger values and coercing invalid
+        `page_handling` / `separator_placement` values to their defaults.
       operationId: updateConfig
       tags: [config]
       requestBody:
