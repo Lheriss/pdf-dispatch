@@ -91,25 +91,32 @@ def _prune_dir(root: Path, max_age_days: int, now: float) -> tuple[int, int]:
     return files_deleted, bytes_freed
 
 
-def _run_cleanup_cycle() -> None:
+def _run_cleanup_cycle() -> dict:
     """Run one retention pass over both folders and log a summary when
     anything was actually removed. Paths are re-read from the live config
-    each cycle so a directory rename via the UI/API is picked up."""
+    each cycle so a directory rename via the UI/API is picked up.
+
+    Returns a summary dict: {folder: {"deleted": n, "bytes": b, "days": d}}
+    for each folder with retention enabled — consumed by the manual-run
+    endpoint and by integration tests."""
     now = time.time()
     dirs = get_dirs()
     targets = (
         (dirs.get("processed", PROCESSED_DIR), RETENTION_DAYS_PROCESSED, "processed"),
         (dirs.get("error", ERROR_DIR),         RETENTION_DAYS_ERROR,     "error"),
     )
+    summary: dict = {}
     for root, days, label in targets:
         if days <= 0:
             continue
         deleted, freed = _prune_dir(Path(root), days, now)
+        summary[label] = {"deleted": deleted, "bytes": freed, "days": days}
         if deleted:
             log_event("info",
                       t("log.retention_cleaned",
                         folder=label, count=deleted,
                         mb=round(freed / (1024 * 1024), 1), days=days))
+    return summary
 
 
 def _retention_loop() -> None:
