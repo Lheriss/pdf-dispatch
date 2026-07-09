@@ -193,6 +193,25 @@ def api_regenerate_api_key():
     return jsonify({"ok": True, "key": new_key})
 
 
+@bp.route("/api/retention/run", methods=["POST"])
+def api_retention_run():
+    """POST /api/retention/run — Run one retention cleanup cycle now.
+
+    Triggers the same cleanup the background thread performs on its schedule,
+    without waiting for the interval. Honours the configured
+    RETENTION_DAYS_PROCESSED / RETENTION_DAYS_ERROR thresholds (folders with
+    a 0 retention are skipped). Returns a per-folder summary of what was
+    removed, e.g.:
+        {"ok": true, "summary": {"processed": {"deleted": 3, "bytes": 12345,
+                                                "days": 90}}}
+    Useful for on-demand cleanup and for integration tests that need a
+    deterministic trigger instead of waiting for the scan interval.
+    """
+    from dispatch.retention import _run_cleanup_cycle
+    summary = _run_cleanup_cycle()
+    return jsonify({"ok": True, "summary": summary})
+
+
 
 
 @bp.route("/api/recent")

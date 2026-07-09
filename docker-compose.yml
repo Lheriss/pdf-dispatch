@@ -24,6 +24,12 @@ services:
       FILE_STABLE_TIMEOUT:  "60"
       FILE_STABLE_INTERVAL: "2"
 
+      # Automatic retention (optional) — delete old files so /data does not
+      # fill up over months. Days per folder; 0 = keep forever (default).
+      # RETENTION_DAYS_PROCESSED: "90"   # /data/output/processed/
+      # RETENTION_DAYS_ERROR:     "30"   # /data/output/error/
+      # RETENTION_SCAN_INTERVAL:  "21600"  # seconds between scans (default 6h)
+
       TZ: "${TZ:-Europe/Zurich}"
       # APP_VERSION is injected at build time via ARG GIT_SHA in the
       # Dockerfile. Do NOT set it here — a value here would override the

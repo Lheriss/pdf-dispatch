@@ -1006,7 +1006,8 @@ function dtRender(d, box) {
   box.innerHTML = html;
 }
 
-// ── Dossiers ──────────────────────────────────────────────────────────────const DIR_LABELS = () => ({input: '📂 ' + t('dirs.label_input'), output: '📁 ' + t('dirs.label_output'), no_code: '🔍 ' + t('dirs.label_no_code'), error: '⚠️ ' + t('dirs.label_error'), processed: '✅ ' + t('dirs.label_processed')});
+// ── Dossiers ──────────────────────────────────────────────────────────────
+const DIR_LABELS = () => ({input: '📂 ' + t('dirs.label_input'), output: '📁 ' + t('dirs.label_output'), no_code: '🔍 ' + t('dirs.label_no_code'), error: '⚠️ ' + t('dirs.label_error'), processed: '✅ ' + t('dirs.label_processed')});
 const DIR_ORDER  = ['input', 'output', 'no_code', 'error', 'processed'];
 let activeDirKey = null;
 
