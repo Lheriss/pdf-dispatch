@@ -624,6 +624,13 @@ paths:
                     type: boolean
                     description: True when the trigger list is empty (every code splits).
                   separator_placement: {type: string, enum: [before, after]}
+                  blank_page_split:
+                    type: boolean
+                    description: Whether blank-page splitting is enabled (BLANK_PAGE_SPLIT).
+                  blank_page_threshold:
+                    type: number
+                    description: Ink ratio below which a page is treated as blank.
+                    example: 0.005
                   pages_total: {type: integer}
                   pages_analyzed: {type: integer}
                   truncated:
@@ -663,6 +670,27 @@ paths:
                               matches:
                                 type: array
                                 items: {type: object}
+                        blank:
+                          type: object
+                          description: Blank-page diagnostic for this page.
+                          properties:
+                            ink_ratio:
+                              type: number
+                              description: Fraction of ink pixels in the central area (lower = emptier).
+                              example: 0.0
+                            mean:
+                              type: number
+                              nullable: true
+                              description: Mean grayscale intensity of the page.
+                            threshold_used:
+                              type: number
+                              description: BLANK_PAGE_THRESHOLD at the time of analysis.
+                            is_blank:
+                              type: boolean
+                              description: Whether the page is below the blank threshold (and carries no code).
+                            would_split_here:
+                              type: boolean
+                              description: Whether this page would cause a split (is_blank and blank_page_split enabled).
         "400":
           description: No file provided, or the file is not a valid PDF.
           content:

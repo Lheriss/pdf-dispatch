@@ -34,6 +34,7 @@ Self-hosted Docker service that splits multi-page PDFs on detection of barcodes 
 - **Automatic splitting** — monitors a folder; every PDF dropped in is processed immediately
 - **Three input sources** — watched folder, web interface (drag-and-drop or API upload), IMAP email
 - **Flexible trigger matching** — exact codes, glob patterns (`INVOICE*`, `[A-Z][0-9]`), case-insensitive
+- **Blank-page separators** — split on plain blank sheets from the paper tray, office-copier style, with no printed barcode pages to manage (opt-in)
 - **Detection test panel** — drop a page to see which codes are found and whether they match a trigger, without processing anything
 - **Configurable filename construction** — tokens (trigger, date, counter, free text) drag-and-drop reordered
 - **Outbound notifications** — HTTP webhook and/or post-processing shell script after each file
@@ -298,6 +299,8 @@ On first startup, pdf-dispatch creates all required subfolders inside `/data`:
 | `BARCODE_DPI` | `300` | Increase to `600` if codes are not detected |
 | `BARCODE_DPI_SCAN` | `200` | DPI used for the fast first pass over all pages. Pages where a barcode is detected are re-decoded at `BARCODE_DPI` for accuracy. Pages with no code (content pages) are never rasterised at full DPI, making large all-content PDFs ~4× faster to process. Set equal to `BARCODE_DPI` to disable two-pass mode and always scan at full DPI. Increase this value if codes are missed during the first pass — typically when the code occupies a small area of the page (e.g. QR codes embedded in email attachments rather than on dedicated separator sheets), or when codes are small or printed at low quality. |
 | `BARCODE_UPSCALE` | `1.0` | Upscale factor applied before detection |
+| `BLANK_PAGE_SPLIT` | `false` | Enable blank-sheet separators (see [Blank-page separators](#blank-page-separators)). Off by default. |
+| `BLANK_PAGE_THRESHOLD` | `0.005` | Ink ratio below which a page is treated as blank. Lower = stricter (only near-empty pages); higher = more lenient. Calibrate with the Detection test panel. |
 | `FILE_STABLE_TIMEOUT` | `60` | Max seconds to wait for a file to stop changing before processing. Files that exceed this timeout (zero bytes, or still growing) are moved to `/data/output/error/`. |
 | `FILE_STABLE_INTERVAL` | `2` | Seconds between two file-size checks during stabilisation |
 | `MAX_LOG_ENTRIES` | `200` | Maximum number of entries kept in the activity log |
@@ -348,6 +351,16 @@ Clicking a trigger opens its configuration panel:
 #### Downloading the separator page
 
 The **⬇ Download PDF** button inside a trigger's panel generates a printable A4 page containing that trigger's code as a QR code or Code128 barcode. Insert it between documents before scanning. This button is disabled for glob patterns (no fixed value to encode).
+
+### Blank-page separators
+
+Instead of printed barcode sheets, you can separate documents with a **plain blank sheet** from the paper tray — the way office copiers do. Enable it with `BLANK_PAGE_SPLIT=true`. When on, a blank page acts as a separator exactly like a barcode: it splits the batch and is always discarded (nobody wants the blank sheet in the output). It honours the global **Separator placement** (before/after). Documents produced this way carry the trigger value `blank` (so they land in `output/blank/` when *Sort into subfolders* is on).
+
+Detection is designed for real scans, not just pristine PDFs: it measures the fraction of "ink" pixels on the page (`ink_ratio`) using a threshold **relative to the page's own average brightness**, so recycled or cream paper is handled, and it crops the page margins and ignores isolated specks so scanner edge streaks and dust don't count as content. A page is treated as blank when its `ink_ratio` falls below `BLANK_PAGE_THRESHOLD` (default `0.005`).
+
+**Consecutive blanks are grouped**: the back side of a duplex-scanned separator (two blank pages in a row) produces a single split, not two.
+
+> **Calibrating the threshold.** The **Detection test panel** reports each page's `ink_ratio`, page mean, and whether it would be treated as blank at the current threshold. Drop a representative scan (including a real separator sheet and your lightest content page) to pick a threshold that cleanly separates them before enabling the feature in production. A page with very little content (e.g. only a page number) has a low `ink_ratio` and may be read as blank — raise the threshold if that is a concern for your documents.
 
 ### Options
 
@@ -409,7 +422,7 @@ See [Advanced — REST API](#advanced--rest-api) for usage.
 
 Drop a test page (PDF) to see, page by page, every barcode/QR code found — its value, symbology, and position — and whether it matches a configured trigger. The file is **analysed only**: nothing is written to `/data/input/`, no document is produced, and statistics are untouched.
 
-Unlike the processing pipeline, the diagnostic rasterises every page at full DPI, so it flags the classic silent failure where a code decodes at `BARCODE_DPI` but is missed by the `BARCODE_DPI_SCAN` fast scan (the page would then be skipped in production). Each result shows whether the code would be detected by the pipeline and whether it would trigger a split. Backed by the `POST /api/detect` endpoint.
+Unlike the processing pipeline, the diagnostic rasterises every page at full DPI, so it flags the classic silent failure where a code decodes at `BARCODE_DPI` but is missed by the `BARCODE_DPI_SCAN` fast scan (the page would then be skipped in production). Each result shows whether the code would be detected by the pipeline and whether it would trigger a split. For blank-page splitting, each page also reports its `ink_ratio` and whether it would be treated as a blank separator at the current threshold — use this to calibrate `BLANK_PAGE_THRESHOLD`. Backed by the `POST /api/detect` endpoint.
 
 ### Filename construction
 
