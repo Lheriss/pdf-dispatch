@@ -71,7 +71,7 @@ jobs:
       # are pure Python, so no compilation happens under emulation and the
       # arm64 build stays fast.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
