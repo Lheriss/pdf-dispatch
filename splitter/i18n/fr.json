@@ -130,6 +130,7 @@
   "journal.title": "Journal d'activité",
   "log.active_config": "  Config active — déclencheurs:{triggers} suppression:{delete_src} sous-dossiers:{subdirs}",
   "log.all_barcodes": "TOUS les codes",
+  "log.blank_page_detected": "Page blanche séparatrice détectée à la page {page}",
   "log.config_source_defaults": "défauts (premier démarrage)",
   "log.config_source_persistent": "fichier persistant",
   "log.dir_recreated": "⚙ Dossier «{folder}» recréé : {path}",

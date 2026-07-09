@@ -130,6 +130,7 @@
   "journal.title": "Activity log",
   "log.active_config": "  Active config — triggers:{triggers} deletion:{delete_src} subfolders:{subdirs}",
   "log.all_barcodes": "ALL barcodes",
+  "log.blank_page_detected": "Blank separator page detected on page {page}",
   "log.config_source_defaults": "defaults (first startup)",
   "log.config_source_persistent": "persistent file",
   "log.dir_recreated": "⚙ Folder «{folder}» recreated: {path}",

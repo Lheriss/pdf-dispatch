@@ -66,6 +66,26 @@ UPSCALE      = float(os.getenv("BARCODE_UPSCALE", "1.0"))
 SCANNER      = os.getenv("BARCODE_SCANNER", "ZXING").upper()
 MAX_LOG = int(os.getenv("MAX_LOG_ENTRIES", "200"))
 
+# ── Blank-page splitting ──────────────────────────────────────────────────
+# Office-copier style separation: a plain blank sheet from the paper tray
+# acts as a document separator, so no printed barcode sheet is needed.
+# Disabled by default (BLANK_PAGE_SPLIT=false) → existing installs unchanged.
+#
+# Detection (see processing.blank_page_metrics) works on the Pass-1 image
+# already rendered for barcode scanning, so it costs no extra rasterisation:
+#   grayscale → threshold RELATIVE to the page mean (mean − offset), so tinted
+#   / recycled paper is handled → crop margins (drop scanner edge artefacts)
+#   → ink_ratio = fraction of "ink" pixels in the central area.
+# A page is blank when ink_ratio < BLANK_PAGE_THRESHOLD.
+BLANK_PAGE_SPLIT     = os.getenv("BLANK_PAGE_SPLIT", "false").strip().lower() in ("1", "true", "yes", "on")
+BLANK_PAGE_THRESHOLD = float(os.getenv("BLANK_PAGE_THRESHOLD", "0.005"))
+# Advanced tuning (sensible defaults, not surfaced in the UI):
+#   OFFSET  — how far below the page mean a pixel must be to count as ink.
+#   margins — fraction of width/height cropped off each edge before measuring.
+BLANK_PAGE_OFFSET       = int(os.getenv("BLANK_PAGE_OFFSET", "50"))
+BLANK_PAGE_LR_MARGIN    = float(os.getenv("BLANK_PAGE_LR_MARGIN", "0.10"))
+BLANK_PAGE_TB_MARGIN    = float(os.getenv("BLANK_PAGE_TB_MARGIN", "0.05"))
+
 FILE_STABLE_TIMEOUT  = int(os.getenv("FILE_STABLE_TIMEOUT",  "60"))
 FILE_STABLE_INTERVAL = int(os.getenv("FILE_STABLE_INTERVAL", "2"))
 

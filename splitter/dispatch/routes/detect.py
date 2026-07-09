@@ -20,10 +20,11 @@ from flask import Blueprint, jsonify, request
 
 from dispatch.config import (
     BARCODE_DPI_SCAN, DPI, MAX_PAGES, MAX_UPLOAD_MB, SCANNER, UPSCALE,
+    BLANK_PAGE_SPLIT, BLANK_PAGE_THRESHOLD,
     _is_glob_pattern, _match_trigger, get_config, log,
 )
 from dispatch.i18n import t
-from dispatch.processing import decode_page_detailed
+from dispatch.processing import decode_page_detailed, blank_page_metrics
 
 bp = Blueprint("detect", __name__)
 
@@ -203,11 +204,28 @@ def api_detect():
                     "matches":             matches,
                 })
 
+            # Blank-page diagnostic — measured on the fast-scan image, as the
+            # production pipeline does. Exposes ink_ratio and the threshold so
+            # the panel can be used to calibrate BLANK_PAGE_THRESHOLD. A page
+            # with a code is never a blank separator, so is_blank is forced
+            # false there (matches production).
+            bm = blank_page_metrics(fast_imgs[i])
+            has_code = bool(codes_out)
+            is_blank = (not has_code) and bm["ink_ratio"] < BLANK_PAGE_THRESHOLD
+            blank_info = {
+                "ink_ratio":        round(bm["ink_ratio"], 5),
+                "mean":             bm["mean"],
+                "threshold_used":   BLANK_PAGE_THRESHOLD,
+                "is_blank":         is_blank,
+                "would_split_here": is_blank and BLANK_PAGE_SPLIT,
+            }
+
             pages_out.append({
                 "page":   i + 1,
                 "width":  img.width  if img is not None else 0,
                 "height": img.height if img is not None else 0,
                 "codes":  codes_out,
+                "blank":  blank_info,
             })
 
         return jsonify({
@@ -219,6 +237,8 @@ def api_detect():
             "upscale":             UPSCALE,
             "permissive":          permissive,
             "separator_placement": placement,
+            "blank_page_split":    BLANK_PAGE_SPLIT,
+            "blank_page_threshold": BLANK_PAGE_THRESHOLD,
             "pages_total":         pages_total,
             "pages_analyzed":      cap,
             "truncated":           pages_total > cap,
