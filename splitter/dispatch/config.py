@@ -99,6 +99,20 @@ API_TASK_TIMEOUT = int(os.getenv("API_TASK_TIMEOUT", "120"))
 POST_PROCESS_SCRIPT  = os.getenv("POST_PROCESS_SCRIPT",  "").strip()
 POST_PROCESS_TIMEOUT = int(os.getenv("POST_PROCESS_TIMEOUT", "30"))
 
+# Automatic retention — periodically delete old files from the output
+# sub-folders so /data does not fill up silently over months of use.
+# A value of 0 (the default) disables cleanup for that folder, so existing
+# installations keep their current "keep everything" behaviour unless the
+# operator opts in. Files are removed when their modification time is older
+# than the configured number of days.
+#   RETENTION_DAYS_PROCESSED — applies to /data/output/processed/
+#   RETENTION_DAYS_ERROR     — applies to /data/output/error/
+# RETENTION_SCAN_INTERVAL is how often (seconds) the cleanup thread runs;
+# default 6h. The thread is only started when at least one retention is > 0.
+RETENTION_DAYS_PROCESSED = int(os.getenv("RETENTION_DAYS_PROCESSED", "0"))
+RETENTION_DAYS_ERROR     = int(os.getenv("RETENTION_DAYS_ERROR",     "0"))
+RETENTION_SCAN_INTERVAL  = int(os.getenv("RETENTION_SCAN_INTERVAL",  str(6 * 3600)))
+
 # SSRF protection — blocks webhook/email-test requests to private/loopback
 # addresses when set to "block" (#13).  Default "off": all URLs accepted.
 # Enable with SSRF_PROTECTION=block; document in README.

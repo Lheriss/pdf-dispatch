@@ -171,6 +171,24 @@ rendering begins, so normal workloads never approach the memory cap.
 > If you see this in Portainer or `docker ps`, lower `MAX_PAGES` /
 > `MAX_CONCURRENT_PROCESSING`, or raise `MEM_LIMIT` to match your hardware.
 
+#### Automatic retention
+
+Over months of use, `/data/output/processed/` and `/data/output/error/`
+grow without bound and can silently fill the disk. Set a retention in days
+to have old files deleted automatically by a background thread:
+
+| Variable | Applies to | Default |
+|----------|-----------|---------|
+| `RETENTION_DAYS_PROCESSED` | `/data/output/processed/` | `0` (keep forever) |
+| `RETENTION_DAYS_ERROR` | `/data/output/error/` | `0` (keep forever) |
+| `RETENTION_SCAN_INTERVAL` | seconds between cleanup scans | `21600` (6h) |
+
+A value of `0` disables cleanup for that folder, so existing installs keep
+every file unless you opt in. Files are removed once their modification
+time is older than the threshold; emptied per-trigger sub-folders are
+pruned, and the folder roots themselves are never deleted. Each cleanup
+that removes anything is logged (count and MB freed).
+
 #### Capability model
 
 The entrypoint runs briefly as `root` to fix ownership of the bind-mounted

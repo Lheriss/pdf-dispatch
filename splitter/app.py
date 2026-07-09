@@ -102,6 +102,7 @@ from dispatch.watcher import (
     PDFHandler,
     start_watcher,
 )
+from dispatch.retention import start_retention, stop_retention
 
 from dispatch.routes.upload import _parse_upload_override  # noqa: F401 (tests)
 
@@ -112,12 +113,14 @@ from dispatch.routes.upload import _parse_upload_override  # noqa: F401 (tests)
 if __name__ == "__main__":
     start_watcher()
     start_email_poller()
+    start_retention()
     try:
         from waitress import serve
         log.info("Demarrage du serveur (waitress, 4 threads)")
         serve(app, host="0.0.0.0", port=5000, threads=4)
     finally:
         stop_email_poller()
+        stop_retention()
         from dispatch.watcher import stop_watcher
         stop_watcher()
         _file_executor.shutdown(wait=False)
