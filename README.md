@@ -34,9 +34,12 @@ Self-hosted Docker service that splits multi-page PDFs on detection of barcodes 
 - **Automatic splitting** — monitors a folder; every PDF dropped in is processed immediately
 - **Three input sources** — watched folder, web interface (drag-and-drop or API upload), IMAP email
 - **Flexible trigger matching** — exact codes, glob patterns (`INVOICE*`, `[A-Z][0-9]`), case-insensitive
+- **Detection test panel** — drop a page to see which codes are found and whether they match a trigger, without processing anything
 - **Configurable filename construction** — tokens (trigger, date, counter, free text) drag-and-drop reordered
 - **Outbound notifications** — HTTP webhook and/or post-processing shell script after each file
+- **Automatic retention** — optionally delete old `processed/` and `error/` files so the disk never fills silently
 - **REST API** — full programmatic control; OpenAPI 3.1 spec + Swagger UI built in
+- **Multi-architecture image** — published for `linux/amd64` and `linux/arm64` (Raspberry Pi, ARM NAS)
 - **Bilingual interface** — French and English
 
 ---
@@ -62,6 +65,8 @@ After each file: optional **post-processing script** and/or **outbound webhook**
 
 - Docker + Docker Compose (or Portainer)
 - A data folder on the host, readable/writable by the container user
+
+The image is published for both `linux/amd64` and `linux/arm64`, so it runs on a typical x86 NAS as well as on ARM hardware (Raspberry Pi 4/5, ARM-based NAS) — Docker pulls the right architecture automatically.
 
 ```bash
 # Create the data folder (adapt the path to your setup)
@@ -188,6 +193,10 @@ every file unless you opt in. Files are removed once their modification
 time is older than the threshold; emptied per-trigger sub-folders are
 pruned, and the folder roots themselves are never deleted. Each cleanup
 that removes anything is logged (count and MB freed).
+
+A cleanup can also be triggered on demand — without waiting for the scan
+interval — via `POST /api/retention/run`, which returns a per-folder
+summary of what was removed.
 
 #### Capability model
 
@@ -352,7 +361,7 @@ The **⬇ Download PDF** button inside a trigger's panel generates a printable A
 
 ### Configuration panels
 
-Four expandable panels live in the Options section — click their button to open them. Only one panel can be open at a time.
+Five expandable panels live in the Options section — click their button to open them. Only one panel can be open at a time.
 
 #### 📁 Folders
 
@@ -395,6 +404,12 @@ See [Advanced — Webhook HTTP](#advanced--webhook-http) below.
 Displays the current API key, with options to reveal it, copy it, or regenerate it. The key is auto-generated at first startup and stored in `.splitter_config.json`. To use a fixed key instead, set the `API_KEY` environment variable — regeneration from the UI is then disabled.
 
 See [Advanced — REST API](#advanced--rest-api) for usage.
+
+#### 🔎 Detection test
+
+Drop a test page (PDF) to see, page by page, every barcode/QR code found — its value, symbology, and position — and whether it matches a configured trigger. The file is **analysed only**: nothing is written to `/data/input/`, no document is produced, and statistics are untouched.
+
+Unlike the processing pipeline, the diagnostic rasterises every page at full DPI, so it flags the classic silent failure where a code decodes at `BARCODE_DPI` but is missed by the `BARCODE_DPI_SCAN` fast scan (the page would then be skipped in production). Each result shows whether the code would be detected by the pipeline and whether it would trigger a split. Backed by the `POST /api/detect` endpoint.
 
 ### Filename construction
 
@@ -701,6 +716,7 @@ The `trigger` field (no-barcode fallback) and `split_values` are independent —
 | `GET` | `/api/state` | Full state: stats, log, config, email status |
 | `POST` | `/api/config` | Update any config key(s) |
 | `POST` | `/api/upload` | Upload PDFs → returns `task_id` per file |
+| `POST` | `/api/detect` | Analyse a PDF and report detected codes (diagnostic; nothing is processed) |
 | `GET` | `/api/recent?n=20` | List recent output files with download URLs |
 | `GET` | `/api/file/<path>` | Download an output file (`?download=1` forces attachment) |
 | `GET` | `/api/tasks?n=20` | List recent upload tasks |
@@ -708,6 +724,7 @@ The `trigger` field (no-barcode fallback) and `split_values` are independent —
 | `GET` | `/api/separator/<idx>` | Download separator PDF for trigger at index `idx` |
 | `POST` | `/api/webhook/test` | Send test payload to the configured webhook URL |
 | `POST` | `/api/settings/regenerate-api-key` | Generate a new API key |
+| `POST` | `/api/retention/run` | Run one retention cleanup cycle now (see [Automatic retention](#automatic-retention)) |
 | `POST` | `/api/stats/reset` | Reset processing statistics |
 
 ### Full API reference
