@@ -94,7 +94,9 @@ Browse to `http://localhost:5000`.
 
 ## Submitting a pull request
 
-1. **Fork** the repository and create a branch from `main`:
+1. **Fork** the repository and create a branch from `dev` (development
+   happens on `dev`; `main` is the stable branch and is updated only via a
+   `dev → main` pull request):
    ```bash
    git checkout -b fix/my-bug-fix
    ```
@@ -139,3 +141,39 @@ docs(README): document MEM_LIMIT tuning
 | No build step | The frontend (`static/js/app.js`) must remain a single vanilla JS file — no bundler, no npm dependency |
 | i18n | User-visible strings go in `splitter/i18n/fr.json` and `splitter/i18n/en.json` — never hard-coded in templates |
 | Tests | New behaviour should come with a test in `tests/test_python_core.py` or `tests/test_api.py` |
+
+---
+
+## Keeping documentation in sync
+
+Every functional change must update **all** the documentation it affects, in
+the same commit cycle — never as an afterthought. Before opening a
+`dev → main` PR, check each of these fronts:
+
+1. **README — user-facing** — Features list, configuration, UI panels.
+2. **README — Security section** — anything touching exposure,
+   authentication, resource exhaustion (RAM / CPU / disk), input validation,
+   or permissions.
+3. **OpenAPI spec** — for any added / changed / removed endpoint or
+   request/response schema change: edit `splitter/openapi.yaml` (the source),
+   then regenerate `splitter/openapi.json` (see [Updating
+   `openapi.json`](README.md#updating-openapijson)) and validate it.
+4. **`docker-compose.yml`** — every new environment variable (commented out
+   if the feature is opt-in / disabled by default).
+5. **README — Development section** — project tree, module map
+   (`dispatch/` + `routes/`), the touched modules' responsibilities, the
+   frontend render-function list, and the CI/CD section (triggers,
+   multi-arch, tag strategy).
+
+Prefer stable wording over frozen counts: for example, state that EN/FR
+parity is verified by `check_keys.py` rather than quoting a key count that
+goes stale on the next string added.
+
+### Branch & release flow
+
+- Develop on `dev`; validate the full test suite (the separate
+  `pdf-dispatch-tester` repo) against the `:dev` image.
+- Promote with a `dev → main` pull request. CI builds `:latest` on merge.
+- Tag a release **after** the merge, on the resulting `main` HEAD, so the
+  version is clean (no commit-suffix) and the `:vX.Y.Z` image is produced by
+  the tag workflow.

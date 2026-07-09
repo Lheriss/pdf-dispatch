@@ -43,6 +43,16 @@ APP_VERSION = os.getenv("APP_VERSION", "unknown").strip()  # injected at build t
 # Characters forbidden in file/folder names
 FORBIDDEN_CHARS = '[<>:"/\\|?*\\x00-\\x1f]'
 
+# Reserved trigger values — synthetic routing labels used internally for
+# special output folders, not real barcode/QR values:
+#   "no_code" — files where no trigger code was found
+#   "blank"   — blank-page separators (office-copier style splitting)
+# A user-defined trigger must never equal one of these: a real code with
+# that value would be indistinguishable from the internal case downstream
+# (same output/<value>/ subfolder, same filename token, ambiguous logs).
+# Comparison is case-insensitive so "Blank", "BLANK", etc. are rejected too.
+RESERVED_TRIGGER_VALUES = ("no_code", "blank")
+
 # Effective paths are read from persistent config
 # These variables are updated dynamically via get_dirs()
 INPUT_DIR     = DATA_DIR / "input"
@@ -65,6 +75,26 @@ BARCODE_DPI_SCAN = int(os.getenv("BARCODE_DPI_SCAN", "200"))
 UPSCALE      = float(os.getenv("BARCODE_UPSCALE", "1.0"))
 SCANNER      = os.getenv("BARCODE_SCANNER", "ZXING").upper()
 MAX_LOG = int(os.getenv("MAX_LOG_ENTRIES", "200"))
+
+# ── Blank-page splitting ──────────────────────────────────────────────────
+# Office-copier style separation: a plain blank sheet from the paper tray
+# acts as a document separator, so no printed barcode sheet is needed.
+# Disabled by default (BLANK_PAGE_SPLIT=false) → existing installs unchanged.
+#
+# Detection (see processing.blank_page_metrics) works on the Pass-1 image
+# already rendered for barcode scanning, so it costs no extra rasterisation:
+#   grayscale → threshold RELATIVE to the page mean (mean − offset), so tinted
+#   / recycled paper is handled → crop margins (drop scanner edge artefacts)
+#   → ink_ratio = fraction of "ink" pixels in the central area.
+# A page is blank when ink_ratio < BLANK_PAGE_THRESHOLD.
+BLANK_PAGE_SPLIT     = os.getenv("BLANK_PAGE_SPLIT", "false").strip().lower() in ("1", "true", "yes", "on")
+BLANK_PAGE_THRESHOLD = float(os.getenv("BLANK_PAGE_THRESHOLD", "0.005"))
+# Advanced tuning (sensible defaults, not surfaced in the UI):
+#   OFFSET  — how far below the page mean a pixel must be to count as ink.
+#   margins — fraction of width/height cropped off each edge before measuring.
+BLANK_PAGE_OFFSET       = int(os.getenv("BLANK_PAGE_OFFSET", "50"))
+BLANK_PAGE_LR_MARGIN    = float(os.getenv("BLANK_PAGE_LR_MARGIN", "0.10"))
+BLANK_PAGE_TB_MARGIN    = float(os.getenv("BLANK_PAGE_TB_MARGIN", "0.05"))
 
 FILE_STABLE_TIMEOUT  = int(os.getenv("FILE_STABLE_TIMEOUT",  "60"))
 FILE_STABLE_INTERVAL = int(os.getenv("FILE_STABLE_INTERVAL", "2"))
@@ -313,6 +343,7 @@ def _validate_and_sanitize_config(cfg: dict) -> dict:
             san_dirs[k] = c
         cfg["dirs"] = san_dirs
 
+    _clean_split_values = []
     for sv in cfg.get("split_values", []):
         if isinstance(sv, dict) and "value" in sv:
             v = str(sv["value"])
@@ -320,12 +351,24 @@ def _validate_and_sanitize_config(cfg: dict) -> dict:
             if c != v:
                 issues.append("Control characters in trigger value -> stripped")
                 sv["value"] = c
+                v = c
+            # Reject triggers whose value collides with a reserved routing
+            # label (case-insensitive). Such a code would be indistinguishable
+            # from the internal no_code / blank cases downstream.
+            if v.strip().lower() in RESERVED_TRIGGER_VALUES:
+                issues.append(
+                    f"Trigger value '{v}' is reserved "
+                    f"({', '.join(RESERVED_TRIGGER_VALUES)}) -> removed")
+                continue  # drop this trigger entirely
             sv.setdefault("page_handling", "keep")
             if sv["page_handling"] not in ("keep", "delete"):
                 issues.append(f"page_handling '{sv['page_handling']}' invalid → 'keep'")
                 sv["page_handling"] = "keep"
             if not isinstance(sv.get("case_sensitive"), bool):
                 sv["case_sensitive"] = True
+        _clean_split_values.append(sv)
+    if "split_values" in cfg:
+        cfg["split_values"] = _clean_split_values
 
     if cfg.get("separator_placement") not in ("before", "after"):
         if "separator_placement" in cfg:

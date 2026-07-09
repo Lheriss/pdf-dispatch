@@ -21,6 +21,13 @@ services:
       BARCODE_UPSCALE:  "1.0"
       MAX_LOG_ENTRIES:  "200"
 
+      # Blank-page splitting (optional) — split on plain blank sheets from the
+      # paper tray, office-copier style, with no printed barcode separators.
+      # Disabled by default. Use the Detection test panel to read each page's
+      # ink_ratio and calibrate the threshold on your own scans.
+      # BLANK_PAGE_SPLIT:     "true"    # enable blank-sheet separators
+      # BLANK_PAGE_THRESHOLD: "0.005"   # ink ratio below which a page is blank
+
       FILE_STABLE_TIMEOUT:  "60"
       FILE_STABLE_INTERVAL: "2"
 

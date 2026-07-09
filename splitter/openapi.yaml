@@ -362,6 +362,13 @@ paths:
         // Set separator placement
         {"separator_placement": "after"}
         ```
+
+        Validation: the config is sanitised before it is saved. Triggers
+        whose value equals a reserved routing label (`no_code`, `blank`,
+        case-insensitive) are dropped, since such a value would collide with
+        the internal output routing. Other sanitisation includes stripping
+        control characters from trigger values and coercing invalid
+        `page_handling` / `separator_placement` values to their defaults.
       operationId: updateConfig
       tags: [config]
       requestBody:
@@ -572,6 +579,132 @@ paths:
               schema: {$ref: "#/components/schemas/Error"}
         "404":
           description: File not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/detect:
+    post:
+      summary: Diagnose barcode detection on a PDF
+      description: |
+        Analyses an uploaded PDF and reports, page by page, every barcode/QR
+        code found — value, symbology, pixel position — and whether it matches
+        a configured trigger. Purely diagnostic: the file is analysed in a
+        temporary location and **never enters the processing pipeline**
+        (nothing is written to INPUT_DIR, no document is produced, statistics
+        are untouched).
+
+        Unlike the processing pipeline, every analysed page is rasterised at
+        full `BARCODE_DPI`, so the response can flag codes that decode at full
+        DPI but would be missed by the `BARCODE_DPI_SCAN` fast scan
+        (`production_detected: false`). Analysis is capped at the first
+        `DETECT_MAX_PAGES` pages (default 10).
+      operationId: detectCodes
+      tags: [documents]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: A PDF to analyse (typically a single test page).
+      responses:
+        "200":
+          description: Per-page detection report.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  filename: {type: string}
+                  scanner: {type: string, example: ZXING}
+                  dpi_scan: {type: integer, example: 200}
+                  dpi: {type: integer, example: 300}
+                  upscale: {type: number, example: 1.0}
+                  permissive:
+                    type: boolean
+                    description: True when the trigger list is empty (every code splits).
+                  separator_placement: {type: string, enum: [before, after]}
+                  blank_page_split:
+                    type: boolean
+                    description: Whether blank-page splitting is enabled (BLANK_PAGE_SPLIT).
+                  blank_page_threshold:
+                    type: number
+                    description: Ink ratio below which a page is treated as blank.
+                    example: 0.005
+                  pages_total: {type: integer}
+                  pages_analyzed: {type: integer}
+                  truncated:
+                    type: boolean
+                    description: True when pages_total exceeds the analysis cap.
+                  pages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        page: {type: integer}
+                        width: {type: integer}
+                        height: {type: integer}
+                        codes:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              value: {type: string}
+                              type: {type: string, example: QRCode}
+                              bbox:
+                                type: object
+                                nullable: true
+                                properties:
+                                  x: {type: integer}
+                                  y: {type: integer}
+                                  w: {type: integer}
+                                  h: {type: integer}
+                              at_scan_dpi: {type: boolean}
+                              at_full_dpi: {type: boolean}
+                              production_detected:
+                                type: boolean
+                                description: Whether the processing pipeline would detect this code.
+                              would_split:
+                                type: boolean
+                                description: Whether this code would trigger a split.
+                              matches:
+                                type: array
+                                items: {type: object}
+                        blank:
+                          type: object
+                          description: Blank-page diagnostic for this page.
+                          properties:
+                            ink_ratio:
+                              type: number
+                              description: Fraction of ink pixels in the central area (lower = emptier).
+                              example: 0.0
+                            mean:
+                              type: number
+                              nullable: true
+                              description: Mean grayscale intensity of the page.
+                            threshold_used:
+                              type: number
+                              description: BLANK_PAGE_THRESHOLD at the time of analysis.
+                            is_blank:
+                              type: boolean
+                              description: Whether the page is below the blank threshold (and carries no code).
+                            would_split_here:
+                              type: boolean
+                              description: Whether this page would cause a split (is_blank and blank_page_split enabled).
+        "400":
+          description: No file provided, or the file is not a valid PDF.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "413":
+          description: File exceeds MAX_UPLOAD_MB.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
@@ -1074,6 +1207,40 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/OkTrue"}
+
+  /api/retention/run:
+    post:
+      summary: Run a retention cleanup cycle now
+      description: |
+        Triggers one retention cleanup immediately, without waiting for the
+        scheduled scan interval. Honours the configured
+        `RETENTION_DAYS_PROCESSED` / `RETENTION_DAYS_ERROR` thresholds
+        (folders with a 0-day retention are skipped) and returns a per-folder
+        summary of what was removed. Useful for on-demand cleanup and for
+        integration tests.
+      operationId: runRetention
+      tags: [system]
+      responses:
+        "200":
+          description: Cleanup cycle completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  summary:
+                    type: object
+                    description: Per-folder result; only folders with retention enabled appear.
+                    additionalProperties:
+                      type: object
+                      properties:
+                        deleted: {type: integer, description: Files removed.}
+                        bytes: {type: integer, description: Bytes freed.}
+                        days: {type: integer, description: Retention threshold applied.}
+                    example:
+                      processed: {deleted: 3, bytes: 123456, days: 90}
+                      error: {deleted: 1, bytes: 2048, days: 30}
 
   /api/log:
     post:

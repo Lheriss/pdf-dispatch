@@ -42,6 +42,8 @@ from dispatch.config import (
     FILE_STABLE_TIMEOUT, FORBIDDEN_CHARS, INPUT_DIR,
     MAX_UPLOAD_MB, MAX_WORKER_THREADS, MAX_PAGES,
     OUTPUT_DIR, PROCESSED_DIR, SCANNER, UPSCALE,
+    BLANK_PAGE_SPLIT, BLANK_PAGE_THRESHOLD, BLANK_PAGE_OFFSET,
+    BLANK_PAGE_LR_MARGIN, BLANK_PAGE_TB_MARGIN, RESERVED_TRIGGER_VALUES,
     _is_glob_pattern, _match_trigger, _save_stats,
     get_config, get_dirs, log, next_counter, update_config,
     update_dir_paths,
@@ -333,6 +335,85 @@ def decode_page_detailed(img) -> list[dict]:
             else _decode_detailed_pyzbar(img))
 
 
+# ---------------------------------------------------------------------------
+# Blank-page detection (office-copier style separator)
+# ---------------------------------------------------------------------------
+# Reserved trigger value for a blank separator page. Behaves like a normal
+# trigger value downstream (filename token, output/<trigger>/ subfolder when
+# subdirs_by_trigger is on), mirroring NO_CODE_TRIGGER. Must stay in sync with
+# config.RESERVED_TRIGGER_VALUES, which rejects user triggers using this value.
+BLANK_TRIGGER = "blank"
+
+
+def _safe_code_value(code: str) -> str:
+    """Disambiguate a real scanned code whose value collides with a reserved
+    routing label (no_code / blank). Returns the value to use downstream for
+    naming/routing: unchanged normally, or prefixed ("code_blank") when it
+    would otherwise be indistinguishable from the internal reserved case.
+    The match itself is unaffected — only the stored value is made safe."""
+    if code.strip().lower() in RESERVED_TRIGGER_VALUES:
+        return f"code_{code}"
+    return code
+
+
+def blank_page_metrics(img,
+                       offset: int = None,
+                       lr_margin: float = None,
+                       tb_margin: float = None) -> dict:
+    """Measure how much real content a rendered page image carries.
+
+    Robust to real scans (tinted/recycled paper, scanner edge artefacts,
+    dust) — see the design notes in config.py. Steps:
+      1. grayscale;
+      2. threshold RELATIVE to the page mean (mean − offset), so the ink
+         cut-off adapts to the paper shade instead of assuming pure white;
+      3. crop a margin off each edge to drop ADF streaks / edge shadows;
+      4. ink_ratio = fraction of below-threshold ("ink") pixels in the
+         remaining central area.
+
+    Returns a dict with the ink_ratio plus the intermediate values, so the
+    detection panel can expose them for threshold calibration:
+      {ink_ratio, mean, threshold, width, height, measured_pixels}
+
+    Operates on a PIL image already in memory (Pass-1 render); no extra
+    rasterisation. Never raises — on any error returns ink_ratio 1.0
+    (treated as "not blank", the safe default that avoids a wrong split).
+    """
+    import numpy as np
+    offset    = BLANK_PAGE_OFFSET    if offset    is None else offset
+    lr_margin = BLANK_PAGE_LR_MARGIN if lr_margin is None else lr_margin
+    tb_margin = BLANK_PAGE_TB_MARGIN if tb_margin is None else tb_margin
+    try:
+        gray = np.asarray(img.convert("L"), dtype=np.int16)
+        h, w = gray.shape
+        mean = float(gray.mean())
+        threshold = mean - offset
+        mx = int(w * lr_margin)
+        my = int(h * tb_margin)
+        central = gray[my:h - my, mx:w - mx] if (h - 2 * my > 0 and w - 2 * mx > 0) else gray
+        ink = central < threshold           # True where a pixel is clearly darker than the page
+        ink_ratio = float(ink.mean()) if ink.size else 1.0
+        return {
+            "ink_ratio":       ink_ratio,
+            "mean":            round(mean, 1),
+            "threshold":       round(threshold, 1),
+            "width":           w,
+            "height":          h,
+            "measured_pixels": int(ink.size),
+        }
+    except Exception as e:
+        log.warning(f"blank_page_metrics failed: {e}")
+        return {"ink_ratio": 1.0, "mean": None, "threshold": None,
+                "width": None, "height": None, "measured_pixels": 0}
+
+
+def is_blank_page(img, threshold: float = None) -> bool:
+    """True when the page image carries less ink than `threshold`
+    (defaults to BLANK_PAGE_THRESHOLD)."""
+    threshold = BLANK_PAGE_THRESHOLD if threshold is None else threshold
+    return blank_page_metrics(img)["ink_ratio"] < threshold
+
+
 def find_split_pages(pdf_path: Path, trigger_map: list,
                      separator_placement: str = "before") -> list[dict]:
     """Two-pass barcode scan for efficient processing of multi-page PDFs.
@@ -389,6 +470,27 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
         # Single-pass: trust fast-scan results for positive pages
         verified = {i: fast_codes[i] for i in positive_pages}
 
+    # ── Blank-page detection (optional, office-copier style separator) ────────
+    # A blank sheet inserted between documents acts as a separator. Only pages
+    # with NO barcode are considered (a page can't be both a code and blank).
+    # Consecutive blanks (e.g. the back side of a duplex-scanned separator) are
+    # grouped: only the FIRST blank of each run triggers a split, so a two-sided
+    # blank separator produces a single cut, not two.
+    blank_pages: set[int] = set()
+    if BLANK_PAGE_SPLIT:
+        raw_blanks = []
+        for i in range(n_pages):
+            if verified.get(i):          # has a code → never treated as blank
+                continue
+            if is_blank_page(images_fast[i]):
+                raw_blanks.append(i)
+        # Keep only the first page of each consecutive run.
+        for idx, p in enumerate(raw_blanks):
+            if idx == 0 or p != raw_blanks[idx - 1] + 1:
+                blank_pages.add(p)
+                log_event("info", t("log.blank_page_detected", page=p + 1),
+                          pdf_path.name, verbose=True)
+
     # ── Trigger matching ──────────────────────────────────────────────────────
     # Only positive pages carry codes; negative (content) pages produce no hits.
     hits = []
@@ -399,9 +501,14 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
             if not trigger_map:
                 # Permissive mode: every code triggers a split (one hit per page)
                 if not page_matches:
+                    safe = _safe_code_value(code)
+                    if safe != code:
+                        log_event("info",
+                                  t("log.reserved_code_value", code=code, safe=safe),
+                                  pdf_path.name, verbose=True)
                     page_matches.append({
-                        "value":           code,
-                        "matched_pattern": code,
+                        "value":           safe,
+                        "matched_pattern": safe,
                         "page_handling":   "keep",
                     })
             else:
@@ -417,8 +524,21 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
                                   t("log.page_split", page=i + 1, code=code,
                                     glob_info=glob_info, del_info=del_info),
                                   pdf_path.name, verbose=True)
+                        # Disambiguate a real code whose value collides with a
+                        # reserved routing label (e.g. a barcode literally
+                        # encoding "blank", possibly matched by a glob like *).
+                        # Without this its filename token would be "blank",
+                        # indistinguishable from a blank-page separator. The
+                        # match still stands; only the value used downstream is
+                        # made unambiguous.
+                        safe_value = _safe_code_value(code)
+                        if safe_value != code:
+                            log_event("info",
+                                      t("log.reserved_code_value",
+                                        code=code, safe=safe_value),
+                                      pdf_path.name, verbose=True)
                         page_matches.append({
-                            "value":           code,
+                            "value":           safe_value,
                             "matched_pattern": pattern,
                             "page_handling":   page_handling,
                         })
@@ -445,6 +565,17 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
                     "matched_pattern": m["matched_pattern"],
                     "page_handling":   eff_ph,
                 })
+
+        # A blank separator page (no code, below the ink threshold, first of
+        # its run). Always discarded — nobody wants the blank sheet kept — so
+        # placement only chooses delete (before) vs end_delete (after).
+        elif i in blank_pages:
+            hits.append({
+                "page":            i,
+                "value":           BLANK_TRIGGER,
+                "matched_pattern": BLANK_TRIGGER,
+                "page_handling":   "end_delete" if separator_placement == "after" else "delete",
+            })
     return hits
 
 

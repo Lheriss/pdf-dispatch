@@ -34,6 +34,7 @@ Self-hosted Docker service that splits multi-page PDFs on detection of barcodes 
 - **Automatic splitting** — monitors a folder; every PDF dropped in is processed immediately
 - **Three input sources** — watched folder, web interface (drag-and-drop or API upload), IMAP email
 - **Flexible trigger matching** — exact codes, glob patterns (`INVOICE*`, `[A-Z][0-9]`), case-insensitive
+- **Blank-page separators** — split on plain blank sheets from the paper tray, office-copier style, with no printed barcode pages to manage (opt-in)
 - **Detection test panel** — drop a page to see which codes are found and whether they match a trigger, without processing anything
 - **Configurable filename construction** — tokens (trigger, date, counter, free text) drag-and-drop reordered
 - **Outbound notifications** — HTTP webhook and/or post-processing shell script after each file
@@ -298,6 +299,8 @@ On first startup, pdf-dispatch creates all required subfolders inside `/data`:
 | `BARCODE_DPI` | `300` | Increase to `600` if codes are not detected |
 | `BARCODE_DPI_SCAN` | `200` | DPI used for the fast first pass over all pages. Pages where a barcode is detected are re-decoded at `BARCODE_DPI` for accuracy. Pages with no code (content pages) are never rasterised at full DPI, making large all-content PDFs ~4× faster to process. Set equal to `BARCODE_DPI` to disable two-pass mode and always scan at full DPI. Increase this value if codes are missed during the first pass — typically when the code occupies a small area of the page (e.g. QR codes embedded in email attachments rather than on dedicated separator sheets), or when codes are small or printed at low quality. |
 | `BARCODE_UPSCALE` | `1.0` | Upscale factor applied before detection |
+| `BLANK_PAGE_SPLIT` | `false` | Enable blank-sheet separators (see [Blank-page separators](#blank-page-separators)). Off by default. |
+| `BLANK_PAGE_THRESHOLD` | `0.005` | Ink ratio below which a page is treated as blank. Lower = stricter (only near-empty pages); higher = more lenient. Calibrate with the Detection test panel. |
 | `FILE_STABLE_TIMEOUT` | `60` | Max seconds to wait for a file to stop changing before processing. Files that exceed this timeout (zero bytes, or still growing) are moved to `/data/output/error/`. |
 | `FILE_STABLE_INTERVAL` | `2` | Seconds between two file-size checks during stabilisation |
 | `MAX_LOG_ENTRIES` | `200` | Maximum number of entries kept in the activity log |
@@ -348,6 +351,18 @@ Clicking a trigger opens its configuration panel:
 #### Downloading the separator page
 
 The **⬇ Download PDF** button inside a trigger's panel generates a printable A4 page containing that trigger's code as a QR code or Code128 barcode. Insert it between documents before scanning. This button is disabled for glob patterns (no fixed value to encode).
+
+### Blank-page separators
+
+Instead of printed barcode sheets, you can separate documents with a **plain blank sheet** from the paper tray — the way office copiers do. Enable it with `BLANK_PAGE_SPLIT=true`. When on, a blank page acts as a separator exactly like a barcode: it splits the batch and is always discarded (nobody wants the blank sheet in the output). It honours the global **Separator placement** (before/after). Documents produced this way carry the trigger value `blank` (so they land in `output/blank/` when *Sort into subfolders* is on).
+
+Detection is designed for real scans, not just pristine PDFs: it measures the fraction of "ink" pixels on the page (`ink_ratio`) using a threshold **relative to the page's own average brightness**, so recycled or cream paper is handled, and it crops the page margins and ignores isolated specks so scanner edge streaks and dust don't count as content. A page is treated as blank when its `ink_ratio` falls below `BLANK_PAGE_THRESHOLD` (default `0.005`).
+
+**Consecutive blanks are grouped**: the back side of a duplex-scanned separator (two blank pages in a row) produces a single split, not two.
+
+> **Reserved value `blank`.** You cannot create a trigger whose value is `blank` (it is rejected on save). If a real barcode happens to encode the literal text `blank` — or `no_code` — and is matched by a trigger (including a glob such as `*`), it is still split on normally, but its filename token is written as `code_blank` (resp. `code_no_code`) so it can't be confused with a blank-page separator. Real separators keep the `blank` value.
+
+> **Calibrating the threshold.** The **Detection test panel** reports each page's `ink_ratio`, page mean, and whether it would be treated as blank at the current threshold. Drop a representative scan (including a real separator sheet and your lightest content page) to pick a threshold that cleanly separates them before enabling the feature in production. A page with very little content (e.g. only a page number) has a low `ink_ratio` and may be read as blank — raise the threshold if that is a concern for your documents.
 
 ### Options
 
@@ -409,7 +424,7 @@ See [Advanced — REST API](#advanced--rest-api) for usage.
 
 Drop a test page (PDF) to see, page by page, every barcode/QR code found — its value, symbology, and position — and whether it matches a configured trigger. The file is **analysed only**: nothing is written to `/data/input/`, no document is produced, and statistics are untouched.
 
-Unlike the processing pipeline, the diagnostic rasterises every page at full DPI, so it flags the classic silent failure where a code decodes at `BARCODE_DPI` but is missed by the `BARCODE_DPI_SCAN` fast scan (the page would then be skipped in production). Each result shows whether the code would be detected by the pipeline and whether it would trigger a split. Backed by the `POST /api/detect` endpoint.
+Unlike the processing pipeline, the diagnostic rasterises every page at full DPI, so it flags the classic silent failure where a code decodes at `BARCODE_DPI` but is missed by the `BARCODE_DPI_SCAN` fast scan (the page would then be skipped in production). Each result shows whether the code would be detected by the pipeline and whether it would trigger a split. For blank-page splitting, each page also reports its `ink_ratio` and whether it would be treated as a blank separator at the current threshold — use this to calibrate `BLANK_PAGE_THRESHOLD`. Backed by the `POST /api/detect` endpoint.
 
 ### Filename construction
 
@@ -756,6 +771,7 @@ npx @openapitools/openapi-generator-cli generate \
 - **IMAP field validation** — `host`, `username`, and `folder` reject CRLF characters (`\r`, `\n`) to prevent IMAP injection. `port` is validated to `1–65535` and `poll_interval` must be ≥ 1.
 - **`password_enc`** is never returned by any API endpoint — the encrypted field is stripped before serialisation.
 - **`POST /api/config`** rejects attempts to overwrite internal-only keys (`email_configs`, `stats`, `counter`) and validates folder paths before applying.
+- **Reserved trigger values** — a trigger whose value equals a reserved routing label (`no_code`, `blank`, case-insensitive) is rejected on save. Such a value would collide with the internal output routing (a real code could not be told apart from the no-code or blank-separator case). Enforced server-side in config validation; the UI also blocks it on entry.
 - **Activity log** — control characters in messages posted via `/api/log` are sanitised (replaced with spaces) to prevent log injection and terminal escape sequences.
 - **Webhook URL sanitisation** — `webhook_url` and `webhook_secret` are stripped of CR (`\r`) and LF (`\n`) characters on every config update to prevent HTTP header injection. A value such as `"\r\nX-Inject: bad"` is stored and delivered as `"X-Inject: bad"` (CRLF prefix removed).
 - **`/api/recent?n=`** — non-integer values return HTTP 400 instead of 500.
@@ -764,6 +780,7 @@ npx @openapitools/openapi-generator-cli generate \
   - `MAX_UPLOAD_MB` (default 50) and `MAX_PAGES` (default 100): reject oversized files before any rendering. A 200-page PDF at 300 DPI needs ~5 GB of RAM and can crash Docker.
   - `MAX_CONCURRENT_PROCESSING` (default 2): limits concurrent DPI renders across all input modes (file-drop, API, email). Without this cap, simultaneous uploads saturate the CPU/RAM and make the Flask API unresponsive even for lightweight requests.
   - `API_TASK_TIMEOUT` (default 120 s): moves a task to `/error/` if processing takes too long, preventing a single stuck PDF from occupying a concurrency slot indefinitely.
+  - `RETENTION_DAYS_PROCESSED` / `RETENTION_DAYS_ERROR` (**disabled by default**): the memory/CPU limits above protect against exhaustion *per request*, but `output/processed/` and `output/error/` grow indefinitely and can silently fill the disk over months — a slow denial-of-service against the volume, which on a shared NAS can also starve co-located services. Set a retention in days to bound this (see [Automatic retention](#automatic-retention)). Unlike the other limits, this one is opt-in, so the disk is **not** protected until you enable it.
 - **Basic auth transmits credentials in base64** (not encrypted). Combine with HTTPS if exposed beyond a trusted network — for example via the Synology reverse proxy (DSM → Control Panel → Application Portal → Reverse Proxy) with a Let's Encrypt certificate.
 - For SSO or multi-factor authentication, place the service behind an authentication reverse proxy (Authelia, Authentik, etc.).
 
@@ -819,20 +836,22 @@ pdf-dispatch/
     │   ├── state.py        ← in-memory shared state (locks, log, task tracking)
     │   ├── hook.py         ← post-processing hook (POST_PROCESS_SCRIPT)
     │   ├── webhook.py      ← outbound webhook (SSRF guard, HMAC, async delivery)
-    │   ├── processing.py   ← full PDF pipeline (stabilisation, barcode scan, split, write)
+    │   ├── processing.py   ← full PDF pipeline (stabilisation, barcode scan, blank-page detection, split, write)
+    │   ├── retention.py    ← background retention thread (deletes old processed/error files)
     │   ├── email_poller.py ← background IMAP poller (threading, deduplication, limits)
     │   ├── watcher.py      ← watchdog observer on /data/input/, startup scan
     │   └── routes/         ← Flask Blueprints (one per concern)
     │       ├── auth.py         ← before_app_request: X-API-Key + HTTP Basic auth
     │       ├── docs.py         ← /healthz, /api/runtime, /api/openapi.*, /api/docs
-    │       ├── core.py         ← /api/state, /api/config, /api/log, /api/dirs, /api/recent
+    │       ├── core.py         ← /api/state, /api/config, /api/log, /api/dirs, /api/recent, /api/retention/run
     │       ├── upload.py       ← /api/upload, /api/tasks, /api/file
+    │       ├── detect.py       ← /api/detect (barcode + blank-page detection diagnostic)
     │       ├── email_routes.py ← /api/email/configs, /api/email/test, /api/email/reset_ids
     │       ├── separator.py    ← /api/separator/<idx>
     │       └── webhook_routes.py ← /api/webhook/test
     ├── i18n/
-    │   ├── fr.json         ← French translations (283 keys)
-    │   ├── en.json         ← English translations
+    │   ├── fr.json         ← French translations
+    │   ├── en.json         ← English translations (kept in key-parity with fr.json)
     │   └── check_keys.py   ← verifies key consistency between FR/EN files
     ├── templates/
     │   └── index.html      ← single-page app HTML skeleton (rendered with Jinja2)
@@ -856,13 +875,15 @@ re-exports symbols for the test suite. The application logic lives in the
 | `state.py` | In-memory shared state: locks, processing semaphore, activity log, async task store, per-file config overrides |
 | `hook.py` | `_run_post_process_hook` — runs `POST_PROCESS_SCRIPT` after each file |
 | `webhook.py` | SSRF guard, payload builder, async HMAC-signed delivery with retries |
-| `processing.py` | Full PDF pipeline: filename construction, folder routing, file stabilisation, two-pass barcode scan, split/write, metadata, separator generation, `process_file` |
+| `processing.py` | Full PDF pipeline: filename construction, folder routing, file stabilisation, two-pass barcode scan, blank-page detection, split/write, metadata, separator generation, `process_file` |
+| `retention.py` | Background retention thread: deletes files older than `RETENTION_DAYS_*` from `output/processed/` and `output/error/`, prunes emptied per-trigger subfolders; on-demand cycle for `/api/retention/run` |
 | `email_poller.py` | Background IMAP thread: polling, filters, attachment download, Message-ID deduplication, retention limits |
 | `watcher.py` | `watchdog.Observer` on `/data/input/`, processing thread pool, startup scan and banner |
 | `routes/auth.py` | `before_app_request` hook: X-API-Key then HTTP Basic auth |
 | `routes/docs.py` | `/healthz`, `/api/runtime`, `/api/openapi.*`, `/api/docs` |
-| `routes/core.py` | `/api/state`, `/api/config`, `/api/log`, `/api/dirs/*`, `/api/recent`, `/api/stats/reset` |
+| `routes/core.py` | `/api/state`, `/api/config`, `/api/log`, `/api/dirs/*`, `/api/recent`, `/api/retention/run`, `/api/stats/reset` |
 | `routes/upload.py` | `/api/upload`, `/api/tasks`, `/api/file/<path>` |
+| `routes/detect.py` | `/api/detect` — barcode + blank-page detection diagnostic (nothing is processed) |
 | `routes/email_routes.py` | `/api/email/configs` CRUD, `/api/email/test`, `/api/email/reset_ids/<id>` |
 | `routes/separator.py` | `/api/separator/<idx>` — printable separator PDF |
 | `routes/webhook_routes.py` | `/api/webhook/test` |
@@ -870,7 +891,7 @@ re-exports symbols for the test suite. The application logic lives in the
 ### Frontend
 
 - **`index.html`** — HTML skeleton only. Translations for the active language are injected server-side into `window.I18N`.
-- **`app.js`** — all frontend logic, no external dependencies, no build step. Global state in `cfg` and `state`; rendering functions (`renderTriggers`, `renderOptions`, `renderWebhook`, `renderApiKey`, `renderTokens`, …); action functions (save, validate, upload, testWebhook, …). `t('key', {param: value})` translates via `window.I18N`.
+- **`app.js`** — all frontend logic, no external dependencies, no build step. Global state in `cfg` and `state`; rendering functions (`renderTriggers`, `renderOptions`, `renderDirs`, `renderEmailConfigs`, `renderWebhook`, `renderApiKey`, `renderTokens`, …); action functions (save, validate, upload, testWebhook, …). `t('key', {param: value})` translates via `window.I18N`.
 - **`style.css`** — theme via CSS variables (`:root`). Dark mode by default.
 
 No build step: edit source files and restart the container.
@@ -904,12 +925,17 @@ node tests/test_js_functional.js
 
 ### CI/CD
 
-GitHub Actions (`.github/workflows/docker-build.yml`) runs on every push to `main`:
+GitHub Actions (`.github/workflows/docker-build.yml`) runs on pushes to `main` and `dev`, on `v*` tags, and on pull requests:
 
 1. Dependency security audit (`pip-audit`)
 2. Python syntax check; JS syntax check
 3. i18n key consistency; `t()` collision detection
 4. Python core unit tests (`test_python_core.py`) and JS functional tests
-5. Docker image build (with smoke test: container starts and `/healthz` responds)
-6. Push to `ghcr.io/lheriss/pdf-dispatch:latest` (and `:<short-sha>`) — only on push to `main`, skipped on PRs
+5. Docker image build (with smoke test: container starts and `/healthz` responds). Pull requests build for `linux/amd64` only and do not push.
+6. On push (not PRs), build and push a multi-architecture image (`linux/amd64`, `linux/arm64`) to `ghcr.io/lheriss/pdf-dispatch` with tags by ref:
+   - push to `main` → `:latest` + `:<sha8>`
+   - push to `dev` → `:dev` + `:<sha8>`
+   - push of a `v*` tag → `:latest` + `:vX.Y.Z` + `:<sha8>`
+
+The `:<sha8>` tag (short commit SHA) is published on every push, giving a unique immutable reference for each build. Pin production to a `:vX.Y.Z` tag for a fixed, traceable version.
 
