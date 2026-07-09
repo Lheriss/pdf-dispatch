@@ -836,20 +836,22 @@ pdf-dispatch/
     │   ├── state.py        ← in-memory shared state (locks, log, task tracking)
     │   ├── hook.py         ← post-processing hook (POST_PROCESS_SCRIPT)
     │   ├── webhook.py      ← outbound webhook (SSRF guard, HMAC, async delivery)
-    │   ├── processing.py   ← full PDF pipeline (stabilisation, barcode scan, split, write)
+    │   ├── processing.py   ← full PDF pipeline (stabilisation, barcode scan, blank-page detection, split, write)
+    │   ├── retention.py    ← background retention thread (deletes old processed/error files)
     │   ├── email_poller.py ← background IMAP poller (threading, deduplication, limits)
     │   ├── watcher.py      ← watchdog observer on /data/input/, startup scan
     │   └── routes/         ← Flask Blueprints (one per concern)
     │       ├── auth.py         ← before_app_request: X-API-Key + HTTP Basic auth
     │       ├── docs.py         ← /healthz, /api/runtime, /api/openapi.*, /api/docs
-    │       ├── core.py         ← /api/state, /api/config, /api/log, /api/dirs, /api/recent
+    │       ├── core.py         ← /api/state, /api/config, /api/log, /api/dirs, /api/recent, /api/retention/run
     │       ├── upload.py       ← /api/upload, /api/tasks, /api/file
+    │       ├── detect.py       ← /api/detect (barcode + blank-page detection diagnostic)
     │       ├── email_routes.py ← /api/email/configs, /api/email/test, /api/email/reset_ids
     │       ├── separator.py    ← /api/separator/<idx>
     │       └── webhook_routes.py ← /api/webhook/test
     ├── i18n/
-    │   ├── fr.json         ← French translations (283 keys)
-    │   ├── en.json         ← English translations
+    │   ├── fr.json         ← French translations
+    │   ├── en.json         ← English translations (kept in key-parity with fr.json)
     │   └── check_keys.py   ← verifies key consistency between FR/EN files
     ├── templates/
     │   └── index.html      ← single-page app HTML skeleton (rendered with Jinja2)
@@ -873,13 +875,15 @@ re-exports symbols for the test suite. The application logic lives in the
 | `state.py` | In-memory shared state: locks, processing semaphore, activity log, async task store, per-file config overrides |
 | `hook.py` | `_run_post_process_hook` — runs `POST_PROCESS_SCRIPT` after each file |
 | `webhook.py` | SSRF guard, payload builder, async HMAC-signed delivery with retries |
-| `processing.py` | Full PDF pipeline: filename construction, folder routing, file stabilisation, two-pass barcode scan, split/write, metadata, separator generation, `process_file` |
+| `processing.py` | Full PDF pipeline: filename construction, folder routing, file stabilisation, two-pass barcode scan, blank-page detection, split/write, metadata, separator generation, `process_file` |
+| `retention.py` | Background retention thread: deletes files older than `RETENTION_DAYS_*` from `output/processed/` and `output/error/`, prunes emptied per-trigger subfolders; on-demand cycle for `/api/retention/run` |
 | `email_poller.py` | Background IMAP thread: polling, filters, attachment download, Message-ID deduplication, retention limits |
 | `watcher.py` | `watchdog.Observer` on `/data/input/`, processing thread pool, startup scan and banner |
 | `routes/auth.py` | `before_app_request` hook: X-API-Key then HTTP Basic auth |
 | `routes/docs.py` | `/healthz`, `/api/runtime`, `/api/openapi.*`, `/api/docs` |
-| `routes/core.py` | `/api/state`, `/api/config`, `/api/log`, `/api/dirs/*`, `/api/recent`, `/api/stats/reset` |
+| `routes/core.py` | `/api/state`, `/api/config`, `/api/log`, `/api/dirs/*`, `/api/recent`, `/api/retention/run`, `/api/stats/reset` |
 | `routes/upload.py` | `/api/upload`, `/api/tasks`, `/api/file/<path>` |
+| `routes/detect.py` | `/api/detect` — barcode + blank-page detection diagnostic (nothing is processed) |
 | `routes/email_routes.py` | `/api/email/configs` CRUD, `/api/email/test`, `/api/email/reset_ids/<id>` |
 | `routes/separator.py` | `/api/separator/<idx>` — printable separator PDF |
 | `routes/webhook_routes.py` | `/api/webhook/test` |
@@ -887,7 +891,7 @@ re-exports symbols for the test suite. The application logic lives in the
 ### Frontend
 
 - **`index.html`** — HTML skeleton only. Translations for the active language are injected server-side into `window.I18N`.
-- **`app.js`** — all frontend logic, no external dependencies, no build step. Global state in `cfg` and `state`; rendering functions (`renderTriggers`, `renderOptions`, `renderWebhook`, `renderApiKey`, `renderTokens`, …); action functions (save, validate, upload, testWebhook, …). `t('key', {param: value})` translates via `window.I18N`.
+- **`app.js`** — all frontend logic, no external dependencies, no build step. Global state in `cfg` and `state`; rendering functions (`renderTriggers`, `renderOptions`, `renderDirs`, `renderEmailConfigs`, `renderWebhook`, `renderApiKey`, `renderTokens`, …); action functions (save, validate, upload, testWebhook, …). `t('key', {param: value})` translates via `window.I18N`.
 - **`style.css`** — theme via CSS variables (`:root`). Dark mode by default.
 
 No build step: edit source files and restart the container.
@@ -921,12 +925,17 @@ node tests/test_js_functional.js
 
 ### CI/CD
 
-GitHub Actions (`.github/workflows/docker-build.yml`) runs on every push to `main`:
+GitHub Actions (`.github/workflows/docker-build.yml`) runs on pushes to `main` and `dev`, on `v*` tags, and on pull requests:
 
 1. Dependency security audit (`pip-audit`)
 2. Python syntax check; JS syntax check
 3. i18n key consistency; `t()` collision detection
 4. Python core unit tests (`test_python_core.py`) and JS functional tests
-5. Docker image build (with smoke test: container starts and `/healthz` responds)
-6. Push to `ghcr.io/lheriss/pdf-dispatch:latest` (and `:<short-sha>`) — only on push to `main`, skipped on PRs
+5. Docker image build (with smoke test: container starts and `/healthz` responds). Pull requests build for `linux/amd64` only and do not push.
+6. On push (not PRs), build and push a multi-architecture image (`linux/amd64`, `linux/arm64`) to `ghcr.io/lheriss/pdf-dispatch` with tags by ref:
+   - push to `main` → `:latest` + `:<sha8>`
+   - push to `dev` → `:dev` + `:<sha8>`
+   - push of a `v*` tag → `:latest` + `:vX.Y.Z` + `:<sha8>`
+
+The `:<sha8>` tag (short commit SHA) is published on every push, giving a unique immutable reference for each build. Pin production to a `:vX.Y.Z` tag for a fixed, traceable version.
 
