@@ -189,6 +189,9 @@ function applyI18n() {
   document.querySelectorAll('[data-i18n-title]').forEach(el => {
     el.title = t(el.dataset.i18nTitle);
   });
+  document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+    el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
+  });
   const fr = document.getElementById('lang-btn-fr');
   const en = document.getElementById('lang-btn-en');
   if (fr && en) {

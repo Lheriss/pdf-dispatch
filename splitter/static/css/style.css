@@ -22,8 +22,11 @@
  * elles apparaissent dans templates/index.html.
  * ========================================================================== */
 
-:root{--bg:#0d0d0d;--surface:#161616;--surface2:#1e1e1e;--border:#2a2a2a;--accent:#00ff87;--accent2:#0af;--text:#e8e8e8;--muted:#666;--warn:#f5a623;--error:#ff4444;--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif}
+:root{--bg:#0d0d0d;--surface:#161616;--surface2:#1e1e1e;--border:#2a2a2a;--accent:#00ff87;--accent2:#0af;--text:#e8e8e8;--muted:#8a8a8a;--warn:#f5a623;--error:#ff4444;--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+/* Visible keyboard-focus indicator (accent outline, never on mouse click). */
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn:focus-visible,.upload-zone:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:17px;line-height:1.6;min-height:100vh}
 body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.06) 2px,rgba(0,0,0,.06) 4px);pointer-events:none;z-index:1000}
 header{border-bottom:1px solid var(--border);padding:16px 28px;display:flex;align-items:center;gap:14px;position:sticky;top:0;background:rgba(13,13,13,.95);backdrop-filter:blur(8px);z-index:100}

@@ -28,7 +28,7 @@
 <header>
   <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="11" width="7" height="2"/><rect x="10" y="5" width="2" height="14"/><rect x="14" y="5" width="8" height="2"/><rect x="14" y="11" width="8" height="2"/><rect x="14" y="17" width="8" height="2"/></svg></div>
   <h1 data-i18n="app.title">PDF-DISPATCH</h1>
-  <div class="sdot"><div class="dot" id="sdot"></div><span id="stext">actif</span></div>
+  <div class="sdot" role="status" aria-live="polite"><div class="dot" id="sdot" aria-hidden="true"></div><span id="stext">actif</span></div>
 </header>
 
 <main>
@@ -67,7 +67,9 @@
     <div class="section-title" style="margin-bottom:10px" data-i18n="upload.title">Drop zone</div>
     <div class="upload-zone" id="upload-zone"
       ondragover="uzDragOver(event)" ondragleave="uzDragLeave(event)" ondrop="uzDrop(event)"
-      onclick="document.getElementById('upload-input').click()">
+      onclick="document.getElementById('upload-input').click()"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('upload-input').click()}"
+      role="button" tabindex="0" data-i18n-aria-label="a11y.upload_zone" aria-label="Upload PDF files">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)">
         <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 4v12M8 8l4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
@@ -92,7 +94,9 @@
          data-i18n="detect.hint">Drop a test page to see which codes are detected and whether they match a trigger — the file is analysed only, never processed.</div>
     <div class="upload-zone" id="detect-zone" style="min-height:90px"
       ondragover="dtDragOver(event)" ondragleave="dtDragLeave(event)" ondrop="dtDrop(event)"
-      onclick="document.getElementById('detect-input').click()">
+      onclick="document.getElementById('detect-input').click()"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();document.getElementById('detect-input').click()}"
+      role="button" tabindex="0" data-i18n-aria-label="a11y.detect_zone" aria-label="Detection test drop zone">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)">
         <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35" stroke-linecap="round"/>
       </svg>
@@ -135,8 +139,8 @@
       <div class="trigger-panel" id="trigger-panel">
         <div class="trigger-panel-title">
           <span><span data-i18n="triggers.panel_title_prefix">⚙ Configuration —</span> <span id="tp-title">–</span></span>
-          <button class="tp-edit-btn" onclick="toggleTriggerEdit()" data-i18n-title="triggers.edit_value_title" title="Edit trigger value">
-            <svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#f5a623" d="M5 3c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7H5V5h7V3H5m12.78 1a.69.69 0 0 0-.48.2l-1.22 1.21 2.5 2.5L19.8 6.7c.26-.26.26-.7 0-.96l-1.54-1.54a.68.68 0 0 0-.48-.2m-2.41 2.12L9 12.5V15h2.5l6.37-6.38-2.5-2.5Z"/></svg>
+          <button class="tp-edit-btn" onclick="toggleTriggerEdit()" data-i18n-title="triggers.edit_value_title" data-i18n-aria-label="triggers.edit_value_title" title="Edit trigger value">
+            <svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path fill="#f5a623" d="M5 3c-1.11 0-2 .89-2 2v14c0 1.11.89 2 2 2h14c1.11 0 2-.89 2-2v-7h-2v7H5V5h7V3H5m12.78 1a.69.69 0 0 0-.48.2l-1.22 1.21 2.5 2.5L19.8 6.7c.26-.26.26-.7 0-.96l-1.54-1.54a.68.68 0 0 0-.48-.2m-2.41 2.12L9 12.5V15h2.5l6.37-6.38-2.5-2.5Z"/></svg>
           </button>
         </div>
         <div class="tp-edit-row" id="tp-edit-row">
@@ -494,7 +498,7 @@
           <div style="font-size:11px;color:var(--muted);margin-bottom:5px" data-i18n="apikey.key_label">API key</div>
           <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
             <input id="api-key-field" type="password" class="sinput" readonly style="flex:1;font-family:var(--mono);font-size:11px" value="">
-            <button class="btn secondary" style="font-size:11px;padding:4px 8px;min-width:32px" onclick="toggleApiKeyVisibility()" id="api-key-show-btn" title="Show / Hide">👁</button>
+            <button class="btn secondary" style="font-size:11px;padding:4px 8px;min-width:32px" onclick="toggleApiKeyVisibility()" id="api-key-show-btn" data-i18n-aria-label="apikey.toggle_visibility" data-i18n-title="apikey.toggle_visibility" title="Show / Hide"><span aria-hidden="true">👁</span></button>
             <button class="btn secondary" style="font-size:11px;padding:4px 8px" onclick="copyApiKey()" data-i18n="apikey.copy">Copy</button>
           </div>
           <div style="font-size:10px;color:var(--muted);margin-bottom:8px" data-i18n="apikey.usage">HTTP header: X-API-Key: &lt;key&gt;</div>
@@ -515,7 +519,7 @@
 
 <!-- Activity log -->
 <div class="section-title" data-i18n="journal.title">Activity log</div>
-<div class="log-wrap" id="log-wrap"></div>
+<div class="log-wrap" id="log-wrap" role="log" aria-live="polite" aria-label="Activity log" data-i18n-aria-label="journal.title" tabindex="0"></div>
 
 </main>
 <footer><span data-i18n="app.title_footer">pdf-dispatch</span> <span id="app-version">–</span> <span data-i18n="footer.auto_refresh">— actualisation auto. 3 s</span></footer>
