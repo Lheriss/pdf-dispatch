@@ -153,14 +153,14 @@
           <button class="btn secondary" onclick="toggleTriggerEdit()" data-i18n="common.cancel">Annuler</button>
         </div>
         <div class="toggle-row">
-          <label class="toggle"><input type="checkbox" id="tp-delete-page"><span class="toggle-slider"></span></label>
+          <label class="toggle"><input type="checkbox" id="tp-delete-page" data-i18n-aria-label="triggers.delete_page"><span class="toggle-slider"></span></label>
           <span class="toggle-label" data-i18n="triggers.delete_page">Delete separator page</span>
         </div>
         <div style="color:var(--muted);font-size:10px;margin-top:2px;margin-bottom:10px" data-i18n="triggers.delete_page_help">
           Enable this if the page carrying the code is a separate separator sheet that should not be included in the output document. Disable it if the code is printed on the document's own first page.
         </div>
         <div class="toggle-row">
-          <label class="toggle"><input type="checkbox" id="tp-case-sensitive"><span class="toggle-slider"></span></label>
+          <label class="toggle"><input type="checkbox" id="tp-case-sensitive" data-i18n-aria-label="triggers.case_sensitive"><span class="toggle-slider"></span></label>
           <span class="toggle-label" data-i18n="triggers.case_sensitive">Case-sensitive</span>
         </div>
         <div style="color:var(--muted);font-size:10px;border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
@@ -268,15 +268,15 @@
         <!-- Toggles 2-column grid -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-bottom:14px">
           <div class="toggle-row">
-            <label class="toggle"><input type="checkbox" id="opt-subdirs"><span class="toggle-slider"></span></label>
+            <label class="toggle"><input type="checkbox" id="opt-subdirs" data-i18n-aria-label="options.subdirs"><span class="toggle-slider"></span></label>
             <span class="toggle-label" data-i18n="options.subdirs">Sort into subfolders by trigger</span>
           </div>
           <div class="toggle-row">
-            <label class="toggle"><input type="checkbox" id="opt-delete"><span class="toggle-slider"></span></label>
+            <label class="toggle"><input type="checkbox" id="opt-delete" data-i18n-aria-label="options.archive_source"><span class="toggle-slider"></span></label>
             <span class="toggle-label" data-i18n="options.archive_source">Archive source file after processing</span>
           </div>
           <div class="toggle-row">
-            <label class="toggle"><input type="checkbox" id="opt-log-verbose"><span class="toggle-slider"></span></label>
+            <label class="toggle"><input type="checkbox" id="opt-log-verbose" data-i18n-aria-label="options.verbose_log"><span class="toggle-slider"></span></label>
             <span class="toggle-label" data-i18n="options.verbose_log">Detailed log</span>
           </div>
           <!-- Interface language selector -->
@@ -299,7 +299,7 @@
             <span data-i18n="options.reset_stats">Reset statistics</span>
           </button>
           <div style="display:flex;gap:8px">
-            <button class="btn secondary" onclick="toggleDirsPanel()" id="dirs-panel-btn"
+            <button class="btn secondary" onclick="toggleDirsPanel()" id="dirs-panel-btn" aria-expanded="false" aria-controls="dirs-panel"
               style="font-size:12px;display:flex;align-items:center;gap:6px;flex:1;justify-content:center">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.5" fill="none"/>
@@ -307,7 +307,7 @@
               <span data-i18n="options.configure_dirs">Configurer les dossiers</span>
               <span id="dirs-panel-arrow">▶</span>
             </button>
-            <button class="btn secondary" onclick="toggleEmailSection()" id="email-panel-btn"
+            <button class="btn secondary" onclick="toggleEmailSection()" id="email-panel-btn" aria-expanded="false" aria-controls="email-section"
               style="font-size:12px;display:flex;align-items:center;gap:6px;flex:1;justify-content:center">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
@@ -318,7 +318,7 @@
             </button>
           </div>
           <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn secondary" onclick="toggleWebhookPanel()" id="webhook-panel-btn"
+            <button class="btn secondary" onclick="toggleWebhookPanel()" id="webhook-panel-btn" aria-expanded="false" aria-controls="webhook-panel"
               style="font-size:12px;display:flex;align-items:center;gap:6px;flex:1;justify-content:center">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
@@ -327,7 +327,7 @@
               <span data-i18n="options.configure_webhook">Webhook HTTP</span>
               <span id="webhook-panel-arrow">▶</span>
             </button>
-            <button class="btn secondary" onclick="toggleApiKeyPanel()" id="apikey-panel-btn"
+            <button class="btn secondary" onclick="toggleApiKeyPanel()" id="apikey-panel-btn" aria-expanded="false" aria-controls="apikey-panel"
               style="font-size:12px;display:flex;align-items:center;gap:6px;flex:1;justify-content:center">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <path d="M21 2l-9.6 9.6M15.5 7.5l3 3"/><circle cx="7.5" cy="15.5" r="4.5"/>
@@ -372,7 +372,7 @@
               <input class="sinput" id="em-name" style="width:100%" oninput="emailFieldChanged()">
             </div>
             <div class="toggle-row" style="margin-bottom:10px">
-              <label class="toggle"><input type="checkbox" id="em-enabled" onchange="emailFieldChanged()"><span class="toggle-slider"></span></label>
+              <label class="toggle"><input type="checkbox" id="em-enabled" onchange="emailFieldChanged()" data-i18n-aria-label="email.enable_polling"><span class="toggle-slider"></span></label>
               <span class="toggle-label" data-i18n="email.enable_polling">Enable email retrieval</span>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">

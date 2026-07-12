@@ -1122,6 +1122,7 @@ function toggleWebhookPanel() {
   panel.style.display = open ? 'block' : 'none';
   arrow.textContent   = open ? '▼' : '▶';
   btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', String(open));
   if (open) renderWebhook();
 }
 
@@ -1134,6 +1135,7 @@ function toggleApiKeyPanel() {
   panel.style.display = open ? 'block' : 'none';
   arrow.textContent   = open ? '▼' : '▶';
   btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', String(open));
   if (open) renderApiKey();
 }
 
@@ -1146,6 +1148,7 @@ function toggleEmailSection() {
   panel.style.display = open ? 'block' : 'none';
   arrow.textContent   = open ? '▼' : '▶';
   btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', String(open));
   if (open) renderEmailConfigs();
 }
 
@@ -1523,6 +1526,7 @@ function toggleDirsPanel() {
   panel.style.display = open ? 'block' : 'none';
   arrow.textContent   = open ? '▼' : '▶';
   btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', String(open));
   if (open && cfg.app_config) {
     renderDirs(cfg.app_config.dirs_status || {}, cfg.app_config.data_dir || '/data');
   }
