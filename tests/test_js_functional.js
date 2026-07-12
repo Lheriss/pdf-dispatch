@@ -36,6 +36,11 @@ function getEl(id) {
     const el = {
       id, innerHTML: '', textContent: '', value: '', checked: false,
       style: { display: 'none' }, dataset: {}, title: '', disabled: false,
+      _attrs: {},
+      setAttribute(name, value) { this._attrs[name] = String(value); },
+      getAttribute(name) { return name in this._attrs ? this._attrs[name] : null; },
+      removeAttribute(name) { delete this._attrs[name]; },
+      hasAttribute(name) { return name in this._attrs; },
       classList: {
         _s: new Set(),
         toggle(c, force) {
