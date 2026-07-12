@@ -235,6 +235,8 @@ function toggleSettings() {
   const a = document.getElementById('sarrow');
   const open = b.classList.toggle('open');
   a.textContent = open ? '▲' : '▼';
+  const hdr = document.querySelector('[aria-controls="sbody"]');
+  if (hdr) hdr.setAttribute('aria-expanded', String(open));
   if (open && !cfg.loaded) loadConfig();
 }
 
@@ -934,6 +936,8 @@ function toggleDetectPanel() {
   const a = document.getElementById('detect-arrow');
   const open = b.classList.toggle('open');
   a.textContent = open ? '▲' : '▼';
+  const hdr = document.querySelector('[aria-controls="detect-body"]');
+  if (hdr) hdr.setAttribute('aria-expanded', String(open));
 }
 function dtDragOver(e) {
   e.preventDefault();
@@ -1087,6 +1091,8 @@ function toggleOptionsSection() {
   if (!open) _closeAllPanels(null);   // close inline panels when collapsing
   body.style.display = open ? 'block' : 'none';
   arrow.textContent  = open ? '▼' : '▶';
+  const hdr = document.querySelector('[aria-controls="options-body"]');
+  if (hdr) hdr.setAttribute('aria-expanded', String(open));
 }
 
 function _closeAllPanels(except) {

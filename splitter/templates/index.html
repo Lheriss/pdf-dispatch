@@ -85,9 +85,11 @@
 
 <!-- Detection test -->
 <div class="settings" style="margin-top:14px">
-  <div class="settings-header" onclick="toggleDetectPanel()">
+  <div class="settings-header" onclick="toggleDetectPanel()"
+       onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleDetectPanel()}"
+       role="button" tabindex="0" aria-expanded="false" aria-controls="detect-body">
     <span>🔎 <span data-i18n="detect.title">Detection test</span></span>
-    <span class="settings-arrow" id="detect-arrow">▼</span>
+    <span class="settings-arrow" id="detect-arrow" aria-hidden="true">▼</span>
   </div>
   <div class="settings-body" id="detect-body">
     <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:10px"
@@ -125,9 +127,11 @@
 
 <!-- Settings -->
 <div class="settings">
-  <div class="settings-header" onclick="toggleSettings()">
+  <div class="settings-header" onclick="toggleSettings()"
+       onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettings()}"
+       role="button" tabindex="0" aria-expanded="false" aria-controls="sbody">
     <span data-i18n="settings.title">⚙ Configuration</span>
-    <span class="settings-arrow" id="sarrow">▼</span>
+    <span class="settings-arrow" id="sarrow" aria-hidden="true">▼</span>
   </div>
   <div class="settings-body" id="sbody">
 
@@ -238,9 +242,11 @@
 
     <!-- 3. Options (collapsible, closed by default) -->
     <div class="osection">
-      <div class="osection-header" onclick="toggleOptionsSection()">
+      <div class="osection-header" onclick="toggleOptionsSection()"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleOptionsSection()}"
+           role="button" tabindex="0" aria-expanded="false" aria-controls="options-body">
         <span class="slabel" style="margin:0" data-i18n="options.section_title">Options</span>
-        <span id="options-arrow">▶</span>
+        <span id="options-arrow" aria-hidden="true">▶</span>
       </div>
       <div id="options-body" style="display:none">
 
