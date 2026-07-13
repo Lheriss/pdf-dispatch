@@ -42,19 +42,19 @@
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:1;align-content:start">
       <div class="card" style="padding:10px 14px">
         <div class="clabel" data-i18n="stats.processed">Processed</div>
-        <div class="cvalue" style="font-size:18px;line-height:1.2" id="st-proc">–</div>
+        <div class="cvalue" style="font-size:18px;line-height:1.2" id="st-proc"><span class="skeleton">–</span></div>
       </div>
       <div class="card" style="padding:10px 14px">
         <div class="clabel" data-i18n="stats.produced">Produits</div>
-        <div class="cvalue" style="font-size:18px;line-height:1.2" id="st-docs">–</div>
+        <div class="cvalue" style="font-size:18px;line-height:1.2" id="st-docs"><span class="skeleton">–</span></div>
       </div>
       <div class="card" style="padding:10px 14px">
         <div class="clabel" data-i18n="stats.last_file">Dernier fichier</div>
-        <div class="cvalue" style="font-size:12px;line-height:1.3;word-break:break-all" id="st-last">–</div>
+        <div class="cvalue" style="font-size:12px;line-height:1.3;word-break:break-all" id="st-last"><span class="skeleton skeleton-wide">–</span></div>
       </div>
       <div class="card" style="padding:10px 14px">
         <div class="clabel" data-i18n="stats.errors">Erreurs</div>
-        <div class="cvalue" style="font-size:18px;line-height:1.2;color:var(--error)" id="st-err">–</div>
+        <div class="cvalue" style="font-size:18px;line-height:1.2;color:var(--error)" id="st-err"><span class="skeleton">–</span></div>
       </div>
     </div>
   </div>
@@ -525,10 +525,14 @@
 
 <!-- Activity log -->
 <div class="section-title" data-i18n="journal.title">Activity log</div>
-<div class="log-wrap" id="log-wrap" role="log" aria-live="polite" aria-label="Activity log" data-i18n-aria-label="journal.title"></div>
+<div class="log-wrap" id="log-wrap" role="log" aria-live="polite" aria-label="Activity log" data-i18n-aria-label="journal.title"><div class="log-skeleton" id="log-skeleton"><div class="sk-line"></div><div class="sk-line"></div><div class="sk-line"></div><div class="sk-line"></div></div></div>
 
 </main>
 <footer><span data-i18n="app.title_footer">pdf-dispatch</span> <span id="app-version">–</span> <span data-i18n="footer.auto_refresh">— actualisation auto. 3 s</span></footer>
+
+<!-- Toast notifications (non-blocking feedback). aria-live so screen readers
+     announce them; role=status keeps them polite. -->
+<div id="toast-container" aria-live="polite" aria-atomic="false"></div>
 
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
