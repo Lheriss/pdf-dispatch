@@ -1,4 +1,6 @@
 {
+  "a11y.detect_zone": "Test de détection — cliquez ou déposez un PDF ici",
+  "a11y.upload_zone": "Téléverser des fichiers PDF — cliquez ou déposez des fichiers ici",
   "apikey.copied": "Copié !",
   "apikey.copy": "Copier",
   "apikey.env_note": "Clé définie par la variable d'environnement API_KEY — non modifiable depuis l'interface.",
@@ -7,6 +9,7 @@
   "apikey.regenerate": "Régénérer",
   "apikey.regenerate_confirm": "Régénérer la clé API ? L'ancienne clé ne fonctionnera plus.",
   "apikey.section_title": "Accès API",
+  "apikey.toggle_visibility": "Afficher ou masquer la clé API",
   "apikey.usage": "En-tête HTTP : X-API-Key: <clé>",
   "app.title": "PDF-DISPATCH",
   "app.title_footer": "pdf-dispatch",

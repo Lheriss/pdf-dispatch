@@ -178,6 +178,31 @@ function t(key, params) {
   }
   return s;
 }
+
+// Non-blocking toast notification. type: 'info' | 'success' | 'error' | 'warn'.
+// Replaces blocking alert() calls; auto-dismisses (errors linger a bit longer).
+function showToast(message, type = 'info', duration) {
+  const container = document.getElementById('toast-container');
+  if (!container) { console.warn(message); return; }
+  const toast = document.createElement('div');
+  toast.className = 'toast' + (type !== 'info' ? ' toast-' + type : '');
+  // role=alert for errors (assertive), status otherwise (polite).
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  toast.textContent = message;
+  container.appendChild(toast);
+  // Force reflow so the entry transition plays, then reveal.
+  void toast.offsetWidth;
+  toast.classList.add('show');
+  const ms = duration || (type === 'error' ? 6000 : 3500);
+  const remove = () => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  };
+  const timer = setTimeout(remove, ms);
+  // Click to dismiss early.
+  toast.addEventListener('click', () => { clearTimeout(timer); remove(); });
+}
+
 // Apply translations to every element carrying data-i18n
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => {
@@ -188,6 +213,9 @@ function applyI18n() {
   });
   document.querySelectorAll('[data-i18n-title]').forEach(el => {
     el.title = t(el.dataset.i18nTitle);
+  });
+  document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+    el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
   });
   const fr = document.getElementById('lang-btn-fr');
   const en = document.getElementById('lang-btn-en');
@@ -232,6 +260,8 @@ function toggleSettings() {
   const a = document.getElementById('sarrow');
   const open = b.classList.toggle('open');
   a.textContent = open ? '▲' : '▼';
+  const hdr = document.querySelector('[aria-controls="sbody"]');
+  if (hdr) hdr.setAttribute('aria-expanded', String(open));
   if (open && !cfg.loaded) loadConfig();
 }
 
@@ -316,7 +346,7 @@ function addTrigger() {
   const val = inp.value.trim();
   if (!val) return;
   if (RESERVED_TRIGGER_VALUES.includes(val.toLowerCase())) {
-    alert(t('triggers.reserved_value', {value: val}));
+    showToast(t('triggers.reserved_value', {value: val}), 'error');
     return;
   }
   const existing = (cfg.split_values || []).map(tok => typeof tok==='object'?tok.value:tok);
@@ -931,6 +961,8 @@ function toggleDetectPanel() {
   const a = document.getElementById('detect-arrow');
   const open = b.classList.toggle('open');
   a.textContent = open ? '▲' : '▼';
+  const hdr = document.querySelector('[aria-controls="detect-body"]');
+  if (hdr) hdr.setAttribute('aria-expanded', String(open));
 }
 function dtDragOver(e) {
   e.preventDefault();
@@ -1068,7 +1100,7 @@ async function confirmResetStats() {
     document.getElementById('st-err').textContent  = '0';
     document.getElementById('st-last').textContent = '–';
   } catch(e) {
-    alert(t('options.reset_stats_error', {message: e.message}));
+    showToast(t('options.reset_stats_error', {message: e.message}), 'error');
   }
 }
 
@@ -1084,6 +1116,8 @@ function toggleOptionsSection() {
   if (!open) _closeAllPanels(null);   // close inline panels when collapsing
   body.style.display = open ? 'block' : 'none';
   arrow.textContent  = open ? '▼' : '▶';
+  const hdr = document.querySelector('[aria-controls="options-body"]');
+  if (hdr) hdr.setAttribute('aria-expanded', String(open));
 }
 
 function _closeAllPanels(except) {
@@ -1113,6 +1147,7 @@ function toggleWebhookPanel() {
   panel.style.display = open ? 'block' : 'none';
   arrow.textContent   = open ? '▼' : '▶';
   btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', String(open));
   if (open) renderWebhook();
 }
 
@@ -1125,6 +1160,7 @@ function toggleApiKeyPanel() {
   panel.style.display = open ? 'block' : 'none';
   arrow.textContent   = open ? '▼' : '▶';
   btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', String(open));
   if (open) renderApiKey();
 }
 
@@ -1137,6 +1173,7 @@ function toggleEmailSection() {
   panel.style.display = open ? 'block' : 'none';
   arrow.textContent   = open ? '▼' : '▶';
   btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', String(open));
   if (open) renderEmailConfigs();
 }
 
@@ -1383,9 +1420,9 @@ async function removeEmailConfig(id) {
       }
       renderEmailConfigs();
     } else {
-      alert(d.error || t('email.delete_error'));
+      showToast(d.error || t('email.delete_error'), 'error');
     }
-  } catch(e) { alert(t('common.error_label', {message: e.message})); }
+  } catch(e) { showToast(t('common.error_label', {message: e.message}), 'error'); }
 }
 
 async function saveEmailConfig() {
@@ -1423,7 +1460,7 @@ async function saveEmailConfig() {
       w.style.display = 'inline';
       document.getElementById('em-save-btn').disabled = true;
     }
-  } catch(e) { alert(t('common.error_label', {message: e.message})); }
+  } catch(e) { showToast(t('common.error_label', {message: e.message}), 'error'); }
 }
 
 async function testEmailConnection() {
@@ -1478,7 +1515,7 @@ async function resetEmailIds() {
       if (blockedSec) blockedSec.style.display = 'none';
       renderEmailConfigs();
     }
-  } catch(e) { alert(t('common.error_label', {message: e.message})); }
+  } catch(e) { showToast(t('common.error_label', {message: e.message}), 'error'); }
 }
 
 function updateEmailAlert(configsStatus) {
@@ -1514,6 +1551,7 @@ function toggleDirsPanel() {
   panel.style.display = open ? 'block' : 'none';
   arrow.textContent   = open ? '▼' : '▶';
   btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', String(open));
   if (open && cfg.app_config) {
     renderDirs(cfg.app_config.dirs_status || {}, cfg.app_config.data_dir || '/data');
   }

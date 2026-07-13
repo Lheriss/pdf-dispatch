@@ -1,4 +1,6 @@
 {
+  "a11y.detect_zone": "Detection test — click or drop a PDF here",
+  "a11y.upload_zone": "Upload PDF files — click or drop files here",
   "apikey.copied": "Copied!",
   "apikey.copy": "Copy",
   "apikey.env_note": "Key set via API_KEY environment variable — cannot be changed from the UI.",
@@ -7,6 +9,7 @@
   "apikey.regenerate": "Regenerate",
   "apikey.regenerate_confirm": "Regenerate the API key? The old key will stop working immediately.",
   "apikey.section_title": "API access",
+  "apikey.toggle_visibility": "Show or hide the API key",
   "apikey.usage": "HTTP header: X-API-Key: <key>",
   "app.title": "PDF-DISPATCH",
   "app.title_footer": "pdf-dispatch",
