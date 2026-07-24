@@ -495,7 +495,18 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
     # Only positive pages carry codes; negative (content) pages produce no hits.
     hits = []
     for i in range(n_pages):
-        all_codes = verified.get(i, [])
+        # Deduplicate identical decoded values on the same page: the same
+        # physical code printed twice (double separator sheet, label printed
+        # twice) must yield a single output document. Distinct values — and a
+        # single value matched by several triggers — still produce one
+        # document per hit, as documented.
+        raw_codes = verified.get(i, [])
+        all_codes = list(dict.fromkeys(raw_codes))
+        if len(all_codes) < len(raw_codes):
+            log_event("info",
+                      t("log.duplicate_code_ignored", page=i + 1,
+                        count=len(raw_codes) - len(all_codes)),
+                      pdf_path.name, verbose=True)
         page_matches = []
         for code in all_codes:
             if not trigger_map:
@@ -974,6 +985,8 @@ def process_file(pdf_path: Path):
         #
         # Multiple triggers on the same page produce multiple independent output
         # documents (one per trigger hit), each covering the same page range.
+        # Identical duplicate codes on one page are deduplicated upstream in
+        # find_split_pages (one document per distinct code).
 
         from collections import defaultdict as _dd
         by_page = _dd(list)
@@ -1178,5 +1191,4 @@ def process_file(pdf_path: Path):
             processing.discard(fname)
         with state_lock:
             state["queue"].pop(fname, None)   # O(1) vs O(n) list.remove
-
 
