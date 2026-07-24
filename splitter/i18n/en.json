@@ -138,6 +138,7 @@
   "log.config_source_persistent": "persistent file",
   "log.dir_recreated": "⚙ Folder «{folder}» recreated: {path}",
   "log.dir_renamed": "⚙ Folder «{key}»: «{old}» → «{new}»",
+  "log.duplicate_code_ignored": "  Page {page}: {count} duplicate occurrence(s) of the same code ignored (one document per distinct code).",
   "log.email_blocked": "Email polling [{name}] blocked - {reason}. First processed message: {last}. Use the Reset IDs button in the email configuration.",
   "log.email_config_created": "Email configuration created: « {name} »",
   "log.email_config_deleted": "Email configuration deleted: « {name} »",
