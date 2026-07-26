@@ -136,6 +136,7 @@
   "log.blank_page_detected": "Blank separator page detected on page {page}",
   "log.config_source_defaults": "defaults (first startup)",
   "log.config_source_persistent": "persistent file",
+  "log.dir_not_writable_not_empty": "  ✗ Output folder «{path}» is not writable and not empty — cannot auto-recover. Fix ownership manually: chown -R PUID:PGID {path}",
   "log.dir_recreate_failed": "  ✗ Could not recreate output folder «{path}» — next write will fail.",
   "log.dir_recreated": "⚙ Folder «{folder}» recreated: {path}",
   "log.dir_recreated_permission": "  ⚠ Output folder «{path}» is not writable (owner mismatch) — removing and recreating it.",
