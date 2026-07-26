@@ -346,7 +346,7 @@ Clicking a trigger opens its configuration panel:
 | Delete the separator page | No | When enabled, the page containing the code is removed from the output. A document that consists only of the code page is discarded entirely. |
 | Case-sensitive matching | Yes | When disabled, `INVOICE` also matches `invoice`. Has no effect on glob patterns. |
 
-**Multiple triggers on the same page** — one output document is produced per matching trigger, each with its own options applied.
+**Multiple triggers on the same page** — one output document is produced per matching trigger, each with its own options applied. Identical duplicate codes on the same page (the same value decoded more than once, e.g. a separator sheet scanned with the same barcode printed twice) are deduplicated and produce a single document.
 
 #### Downloading the separator page
 
@@ -477,9 +477,10 @@ Shows recent events: file processing, configuration changes, email polling, erro
 | Files present at startup | Processed automatically |
 | File that never stabilises (zero bytes or still growing after `FILE_STABLE_TIMEOUT` s) | Moved to `/data/output/error/` with a stabilisation timeout reason |
 | Separator page only + delete enabled | Discarded, warning logged |
-| Multiple triggers on one page | One output document per trigger |
+| Multiple triggers on one page | One output document per trigger. Identical duplicate codes are deduplicated (one document per distinct code) |
 | Upload exceeds `MAX_UPLOAD_MB` | Rejected with HTTP 400 before writing to disk. The `errors[]` array in the response contains the filename and the limit. |
 | PDF exceeds `MAX_PAGES` | Accepted by the upload endpoint, then immediately deleted. A task is created with `status: error` and a descriptive message. The watchdog never processes it. |
+| Output subdirectory not writable (owner mismatch after PUID/PGID change) | Automatically removed and recreated if **empty**. If non-empty, a warning is logged with the `chown` command to run manually. |
 
 ---
 
@@ -802,6 +803,8 @@ npx @openapitools/openapi-generator-cli generate \
 > restart pdf-dispatch will attempt it again. Prevent this by setting
 > `MAX_PAGES` and `MAX_UPLOAD_MB` conservatively, or by raising `MEM_LIMIT`
 > to accommodate your largest expected PDFs.
+
+> ⚠️ **`Permission denied` on output subfolder**: if the container is recreated with a different `PUID`/`PGID`, existing output subdirectories may be owned by the old UID. pdf-dispatch detects this on the next write attempt: if the directory is **empty**, it removes and recreates it automatically (a warning appears in the activity log). If it is **not empty**, it logs an error with the exact `chown -R PUID:PGID <path>` command to run on the host to restore ownership.
 
 ---
 

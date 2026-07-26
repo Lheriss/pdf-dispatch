@@ -160,6 +160,69 @@ def _pattern_to_dirname(pattern: str) -> str:
     return cleaned[:60] or "trigger"
 
 
+def _ensure_writable_dir(subdir: Path, label: str) -> bool:
+    """Create `subdir` if needed and guarantee it is writable by the current process.
+
+    The standard mkdir + chmod pattern is insufficient when the directory was
+    previously created by a container run with a different PUID/PGID: chmod
+    changes the permission bits but NOT the owner, and a non-owning process
+    cannot chmod a directory it does not own (the call silently fails on many
+    kernels). The directory then exists, looks correct to stat(), but raises
+    EPERM/EACCES on the first write attempt.
+
+    Recovery strategy: if os.access() reports the directory is not writable
+    after mkdir/chmod, we check whether it is empty. If it is, we remove and
+    recreate it fresh (this time owned by the current process). If it is not
+    empty, we do NOT delete it — that would destroy existing output files — and
+    instead log an error so the operator can fix ownership manually.
+    A warning is logged for each recovery attempt.
+
+    Returns True on success, False if recovery also fails (caller continues and
+    the write will fail with a clear OS error, which is already handled upstream
+    by move_to_error).
+    """
+    try:
+        subdir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(subdir, 0o777)
+        except Exception:
+            pass
+        if not os.access(subdir, os.W_OK):
+            # Directory exists but is not writable (owner mismatch).
+            # Only attempt recovery if the directory is empty — deleting a
+            # non-empty directory would destroy existing output files.
+            is_empty = not any(subdir.iterdir())
+            if not is_empty:
+                log_event("warning",
+                          t("log.dir_not_writable_not_empty", path=str(subdir)),
+                          label)
+                return False
+            # Empty and not writable — safe to remove and recreate.
+            log_event("warning",
+                      t("log.dir_recreated_permission", path=str(subdir), label=label),
+                      label)
+            try:
+                shutil.rmtree(str(subdir))
+            except Exception as _rm_err:
+                log_event("warning",
+                          t("log.dir_remove_failed", path=str(subdir), message=_rm_err),
+                          label)
+                return False
+            subdir.mkdir(parents=True, exist_ok=True)
+            os.chmod(subdir, 0o777)
+            if not os.access(subdir, os.W_OK):
+                log_event("warning",
+                          t("log.dir_recreate_failed", path=str(subdir), label=label),
+                          label)
+                return False
+        return True
+    except Exception as _e:
+        log_event("warning",
+                  t("log.dir_recreate_failed", path=str(subdir), label=label),
+                  label)
+        return False
+
+
 def get_output_dir(trigger: str, cfg: dict, matched_pattern: str = None) -> Path:
     """Return the output folder for a given trigger.
     - Always /output/no_code for files with no trigger code.
@@ -167,24 +230,22 @@ def get_output_dir(trigger: str, cfg: dict, matched_pattern: str = None) -> Path
       The folder name is based on the configured pattern (not the actual code
       value), so all codes matching FK* go into FK_/.
     - /output otherwise.
+
+    All managed subdirectories are guaranteed writable on return: if a
+    directory exists but is not writable (e.g. the container was recreated
+    with a different PUID/PGID), _ensure_writable_dir() removes and recreates
+    it so that the next write succeeds.
     """
     if trigger == NO_CODE_TRIGGER:
         subdir = OUTPUT_DIR / NO_CODE_TRIGGER
-        try:
-            subdir.mkdir(parents=True, exist_ok=True)
-            try: os.chmod(subdir, 0o777)
-            except Exception: pass
-        except OSError as _e:
-            log.warning(f"Could not create no_code dir {subdir}: {_e}")
+        _ensure_writable_dir(subdir, NO_CODE_TRIGGER)
         return subdir
     if cfg.get("subdirs_by_trigger", False) and trigger:
         # Use the configured pattern as the folder name
         base   = matched_pattern if matched_pattern else trigger
         safe   = _pattern_to_dirname(base)
         subdir = OUTPUT_DIR / safe
-        subdir.mkdir(parents=True, exist_ok=True)
-        try: os.chmod(subdir, 0o777)
-        except Exception: pass
+        _ensure_writable_dir(subdir, safe)
         return subdir
     return OUTPUT_DIR
 
@@ -495,7 +556,18 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
     # Only positive pages carry codes; negative (content) pages produce no hits.
     hits = []
     for i in range(n_pages):
-        all_codes = verified.get(i, [])
+        # Deduplicate identical decoded values on the same page: the same
+        # physical code printed twice (double separator sheet, label printed
+        # twice) must yield a single output document. Distinct values — and a
+        # single value matched by several triggers — still produce one
+        # document per hit, as documented.
+        raw_codes = verified.get(i, [])
+        all_codes = list(dict.fromkeys(raw_codes))
+        if len(all_codes) < len(raw_codes):
+            log_event("info",
+                      t("log.duplicate_code_ignored", page=i + 1,
+                        count=len(raw_codes) - len(all_codes)),
+                      pdf_path.name, verbose=True)
         page_matches = []
         for code in all_codes:
             if not trigger_map:
@@ -974,6 +1046,8 @@ def process_file(pdf_path: Path):
         #
         # Multiple triggers on the same page produce multiple independent output
         # documents (one per trigger hit), each covering the same page range.
+        # Identical duplicate codes on one page are deduplicated upstream in
+        # find_split_pages (one document per distinct code).
 
         from collections import defaultdict as _dd
         by_page = _dd(list)
@@ -1178,5 +1252,4 @@ def process_file(pdf_path: Path):
             processing.discard(fname)
         with state_lock:
             state["queue"].pop(fname, None)   # O(1) vs O(n) list.remove
-
 
