@@ -160,6 +160,59 @@ def _pattern_to_dirname(pattern: str) -> str:
     return cleaned[:60] or "trigger"
 
 
+def _ensure_writable_dir(subdir: Path, label: str) -> bool:
+    """Create `subdir` if needed and guarantee it is writable by the current process.
+
+    The standard mkdir + chmod pattern is insufficient when the directory was
+    previously created by a container run with a different PUID/PGID: chmod
+    changes the permission bits but NOT the owner, and a non-owning process
+    cannot chmod a directory it does not own (the call silently fails on many
+    kernels). The directory then exists, looks correct to stat(), but raises
+    EPERM/EACCES on the first write attempt.
+
+    Recovery strategy: if os.access() reports the directory is not writable
+    after mkdir/chmod, we remove it entirely (rmtree — safe because the
+    *parent* /data/output/ is always writable, being chowned by the entrypoint
+    on every startup) and recreate it fresh, this time owned by the current
+    process. A warning is logged so the event is visible in the activity log.
+
+    Returns True on success, False if recovery also fails (caller continues and
+    the write will fail with a clear OS error, which is already handled upstream
+    by move_to_error).
+    """
+    try:
+        subdir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(subdir, 0o777)
+        except Exception:
+            pass
+        if not os.access(subdir, os.W_OK):
+            # Directory exists but is not writable — recreate it.
+            log_event("warning",
+                      t("log.dir_recreated_permission", path=str(subdir), label=label),
+                      label)
+            try:
+                shutil.rmtree(str(subdir))
+            except Exception as _rm_err:
+                log_event("warning",
+                          t("log.dir_remove_failed", path=str(subdir), message=_rm_err),
+                          label)
+                return False
+            subdir.mkdir(parents=True, exist_ok=True)
+            os.chmod(subdir, 0o777)
+            if not os.access(subdir, os.W_OK):
+                log_event("warning",
+                          t("log.dir_recreate_failed", path=str(subdir), label=label),
+                          label)
+                return False
+        return True
+    except Exception as _e:
+        log_event("warning",
+                  t("log.dir_recreate_failed", path=str(subdir), label=label),
+                  label)
+        return False
+
+
 def get_output_dir(trigger: str, cfg: dict, matched_pattern: str = None) -> Path:
     """Return the output folder for a given trigger.
     - Always /output/no_code for files with no trigger code.
@@ -167,24 +220,22 @@ def get_output_dir(trigger: str, cfg: dict, matched_pattern: str = None) -> Path
       The folder name is based on the configured pattern (not the actual code
       value), so all codes matching FK* go into FK_/.
     - /output otherwise.
+
+    All managed subdirectories are guaranteed writable on return: if a
+    directory exists but is not writable (e.g. the container was recreated
+    with a different PUID/PGID), _ensure_writable_dir() removes and recreates
+    it so that the next write succeeds.
     """
     if trigger == NO_CODE_TRIGGER:
         subdir = OUTPUT_DIR / NO_CODE_TRIGGER
-        try:
-            subdir.mkdir(parents=True, exist_ok=True)
-            try: os.chmod(subdir, 0o777)
-            except Exception: pass
-        except OSError as _e:
-            log.warning(f"Could not create no_code dir {subdir}: {_e}")
+        _ensure_writable_dir(subdir, NO_CODE_TRIGGER)
         return subdir
     if cfg.get("subdirs_by_trigger", False) and trigger:
         # Use the configured pattern as the folder name
         base   = matched_pattern if matched_pattern else trigger
         safe   = _pattern_to_dirname(base)
         subdir = OUTPUT_DIR / safe
-        subdir.mkdir(parents=True, exist_ok=True)
-        try: os.chmod(subdir, 0o777)
-        except Exception: pass
+        _ensure_writable_dir(subdir, safe)
         return subdir
     return OUTPUT_DIR
 
