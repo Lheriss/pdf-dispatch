@@ -136,6 +136,7 @@
   "log.blank_page_detected": "Page blanche séparatrice détectée à la page {page}",
   "log.config_source_defaults": "défauts (premier démarrage)",
   "log.config_source_persistent": "fichier persistant",
+  "log.dir_not_writable_not_empty": "  ✗ Dossier de sortie «{path}» non accessible en écriture et non vide — récupération impossible. Corriger le propriétaire manuellement : chown -R PUID:PGID {path}",
   "log.dir_recreate_failed": "  ✗ Impossible de recréer le dossier de sortie «{path}» — la prochaine écriture échouera.",
   "log.dir_recreated": "⚙ Dossier «{folder}» recréé : {path}",
   "log.dir_recreated_permission": "  ⚠ Dossier de sortie «{path}» non accessible en écriture (propriétaire incorrect) — suppression et recréation.",
