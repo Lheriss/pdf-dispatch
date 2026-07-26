@@ -171,10 +171,11 @@ def _ensure_writable_dir(subdir: Path, label: str) -> bool:
     EPERM/EACCES on the first write attempt.
 
     Recovery strategy: if os.access() reports the directory is not writable
-    after mkdir/chmod, we remove it entirely (rmtree — safe because the
-    *parent* /data/output/ is always writable, being chowned by the entrypoint
-    on every startup) and recreate it fresh, this time owned by the current
-    process. A warning is logged so the event is visible in the activity log.
+    after mkdir/chmod, we check whether it is empty. If it is, we remove and
+    recreate it fresh (this time owned by the current process). If it is not
+    empty, we do NOT delete it — that would destroy existing output files — and
+    instead log an error so the operator can fix ownership manually.
+    A warning is logged for each recovery attempt.
 
     Returns True on success, False if recovery also fails (caller continues and
     the write will fail with a clear OS error, which is already handled upstream
@@ -187,7 +188,16 @@ def _ensure_writable_dir(subdir: Path, label: str) -> bool:
         except Exception:
             pass
         if not os.access(subdir, os.W_OK):
-            # Directory exists but is not writable — recreate it.
+            # Directory exists but is not writable (owner mismatch).
+            # Only attempt recovery if the directory is empty — deleting a
+            # non-empty directory would destroy existing output files.
+            is_empty = not any(subdir.iterdir())
+            if not is_empty:
+                log_event("warning",
+                          t("log.dir_not_writable_not_empty", path=str(subdir)),
+                          label)
+                return False
+            # Empty and not writable — safe to remove and recreate.
             log_event("warning",
                       t("log.dir_recreated_permission", path=str(subdir), label=label),
                       label)
