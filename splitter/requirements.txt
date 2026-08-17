@@ -5,7 +5,7 @@
 # and a bump of the upper bound here before they can be merged.
 flask>=3.1.3,<4.0.0
 watchdog>=6.0.0,<7.0.0
-pypdf>=6.15.0,<7.0.0
+pypdf>=6.16.0,<7.0.0
 pdf2image>=1.17,<2.0.0
 pyzbar>=0.1.9,<0.2.0
 zxing-cpp>=3.1.1,<4.0.0
