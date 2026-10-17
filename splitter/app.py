@@ -60,6 +60,7 @@ from dispatch.config import (
     _validate_and_sanitize_config,
     _is_glob_pattern, _match_trigger,
     _seed_language,
+    _ensure_api_key,
     load_config, save_config, get_config, update_config,
     _counter_lock, _counter_value,
     _counter_persist, _counter_load, next_counter,
