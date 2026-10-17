@@ -23,6 +23,14 @@ def _require_auth():
       2. HTTP Basic auth — active only when both APP_USERNAME and APP_PASSWORD
          environment variables are set (AUTH_ENABLED).
 
+    If neither method validates the request:
+      • When an API key exists in config (the default after first start),
+        anonymous requests are rejected with HTTP 401.  Presenting the key
+        is mandatory; the key only being *optional* was the original bypass.
+      • When truly no auth mechanism is configured (no stored key, no Basic
+        env vars) the request is allowed.  This is the documented
+        “isolated-network, no authentication” mode.
+
     /healthz is always allowed without authentication (Docker HEALTHCHECK).
     """
     if request.path == "/healthz":
@@ -43,7 +51,21 @@ def _require_auth():
     _username = os.getenv("APP_USERNAME", "")
     _password = os.getenv("APP_PASSWORD", "")
     if not (_username and _password):
+        # Basic auth is not configured.  If an API key exists the request
+        # MUST have provided it and been accepted above.  Reaching here
+        # means no valid key was presented — reject to close the bypass.
+        env_key    = os.getenv("API_KEY", "").strip()
+        stored_key = env_key or get_config().get("api_key", "")
+        if stored_key:
+            return Response(
+                "API key required.",
+                401,
+                {"WWW-Authenticate": 'Basic realm="pdf-dispatch"'},
+            )
+        # No API key configured at all: allow (explicitly unauthenticated
+        # mode, documented for isolated single-user networks).
         return None
+
     auth  = request.authorization
     valid = (
         auth is not None
@@ -56,8 +78,3 @@ def _require_auth():
             {"WWW-Authenticate": 'Basic realm="pdf-dispatch"'},
         )
     return None
-
-
-
-
-
