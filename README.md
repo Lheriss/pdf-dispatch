@@ -184,7 +184,7 @@ grow without bound and can silently fill the disk. Set a retention in days
 to have old files deleted automatically by a background thread:
 
 | Variable | Applies to | Default |
-|----------|-----------|--------|
+|----------|-----------|---------|
 | `RETENTION_DAYS_PROCESSED` | `/data/output/processed/` | `0` (keep forever) |
 | `RETENTION_DAYS_ERROR` | `/data/output/error/` | `0` (keep forever) |
 | `RETENTION_SCAN_INTERVAL` | seconds between cleanup scans | `21600` (6h) |
@@ -211,7 +211,7 @@ The `cap_drop: ALL` + `cap_add` block retains only the five capabilities
 actually used during that startup phase:
 
 | Capability | Used for |
-|------------|---------|
+|------------|----------|
 | `CHOWN` | `chown /data` to PUID/PGID |
 | `SETUID` / `SETGID` | `gosu` identity switch |
 | `DAC_OVERRIDE` | Override permissions when `chown` sees files owned by another UID |
@@ -334,7 +334,7 @@ The trigger list defines which barcode/QR code values cause a split. If the list
 Each trigger in the list shows indicator badges:
 
 | Badge | Meaning |
-|-------|--------|
+|-------|---------|
 | `~` | Glob pattern |
 | `Aa` | Case-insensitive matching active |
 | `✂` | Separator page will be deleted |
@@ -470,7 +470,7 @@ Shows recent events: file processing, configuration changes, email polling, erro
 ### Special cases
 
 | Situation | Behaviour |
-|-----------|----------|
+|-----------|-----------|
 | PDF with no trigger code | Copied to `/data/output/no_code/` |
 | Corrupted or unreadable PDF | Moved to `/data/output/error/` |
 | Non-PDF file | Moved to `/data/output/error/` |
@@ -909,7 +909,8 @@ import yaml, json
 json.dump(
   yaml.safe_load(open('splitter/openapi.yaml')),
   open('splitter/openapi.json', 'w'),
-  ensure_ascii=False, indent=2)"
+  ensure_ascii=False, indent=2
+)"
 ```
 
 ### Running tests locally
@@ -940,3 +941,4 @@ GitHub Actions (`.github/workflows/docker-build.yml`) runs on pushes to `main` a
    - push of a `v*` tag → `:latest` + `:vX.Y.Z` + `:<sha8>`
 
 The `:<sha8>` tag (short commit SHA) is published on every push, giving a unique immutable reference for each build. Pin production to a `:vX.Y.Z` tag for a fixed, traceable version.
+
