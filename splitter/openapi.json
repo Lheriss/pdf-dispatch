@@ -3,7 +3,7 @@
   "info": {
     "title": "pdf-dispatch",
     "version": "1.26.0",
-    "description": "Self-hosted PDF splitting service. Watches a folder, splits multi-page\nPDFs on barcode/QR code detection, and routes output documents by trigger code.\n\nConfigurable entirely from the web interface; every setting is also accessible\nvia this REST API, making pdf-dispatch scriptable from Home Assistant, n8n,\nNode-RED, shell scripts, and any HTTP client.\n\n## Authentication\n\nEvery endpoint requires authentication except `/healthz` and this API\ndescription (`/api/openapi.json`, `/api/openapi.yaml`, `/api/docs`).\nAccepted credentials, checked in order:\n\n1. **API key** *(for scripts and integrations)*: `X-API-Key: <key>` header.  \n   The key is auto-generated on first start, written once to the container\n   log, stored in `.splitter_config.json` and shown in the *API access*\n   section of the web interface. Override with the `API_KEY` environment\n   variable. A wrong key is **always rejected** — no fall-through to the\n   other methods.\n\n2. **Session cookie** *(web interface)*: obtained by entering the API key\n   on the `/login` page. State-changing requests (`POST`, `PUT`, `DELETE`)\n   authenticated this way must also send an `X-Requested-With` header\n   (CSRF protection), otherwise they get HTTP 403. Regenerating the API key\n   ends every session.\n\n3. **HTTP Basic auth**: active only when both `APP_USERNAME` and\n   `APP_PASSWORD` environment variables are set.\n\nUnauthenticated requests get HTTP 401 with a JSON body\n(`{\"ok\": false, \"error\": \"Authentication required.\"}`), or a Basic\nchallenge when Basic auth is configured.\n",
+    "description": "Self-hosted PDF splitting service. Watches a folder, splits multi-page\nPDFs on barcode/QR code detection, and routes output documents by trigger code.\n\nConfigurable entirely from the web interface; every setting is also accessible\nvia this REST API, making pdf-dispatch scriptable from Home Assistant, n8n,\nNode-RED, shell scripts, and any HTTP client.\n\n## Authentication\n\nEvery endpoint requires authentication except `/healthz` and this API\ndescription (`/api/openapi.json`, `/api/openapi.yaml`, `/api/docs`).\nTwo kinds of credentials exist: the **API key** for scripts and\nintegrations, and the **administrator account** (username + password)\nfor people using the web interface. Accepted, checked in order:\n\n1. **API key** *(recommended for scripts)*: `X-API-Key: <key>` header.  \n   Auto-generated on first start, stored in `.splitter_config.json` and\n   shown in the *API access* section of the web interface. Override with\n   the `API_KEY` environment variable. A wrong key is **always rejected**\n   — no fall-through to the other methods.\n\n2. **Session cookie** *(web interface)*: set when the administrator signs\n   in on `/login`. State-changing requests (`POST`, `PUT`, `DELETE`)\n   authenticated this way must also send an `X-Requested-With` header\n   (CSRF protection), otherwise they get HTTP 403. Changing the password\n   ends every session; regenerating the API key does not.\n\n3. **HTTP Basic `Authorization` header** with the administrator account\n   (created on the first-run `/setup` page, or `APP_USERNAME` /\n   `APP_PASSWORD`). The server never sends a Basic challenge.\n\nUnauthenticated requests get HTTP 401 with a JSON body\n(`{\"ok\": false, \"error\": \"Authentication required.\"}`).\n",
     "contact": {
       "name": "pdf-dispatch on GitHub",
       "url": "https://github.com/Lheriss/pdf-dispatch"
@@ -72,12 +72,12 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "pdf_dispatch_session",
-        "description": "Signed session cookie set by the web-interface sign-in page (`/login`). Write requests using it must also send `X-Requested-With`.\n"
+        "description": "Signed session cookie set when the administrator signs in on `/login`. Write requests using it must also send `X-Requested-With`.\n"
       },
       "basicAuth": {
         "type": "http",
         "scheme": "basic",
-        "description": "Active only when both `APP_USERNAME` and `APP_PASSWORD` environment variables are set.\n"
+        "description": "The administrator account (created on the first-run setup page, or `APP_USERNAME` / `APP_PASSWORD`). Accepted when sent; never solicited.\n"
       }
     },
     "schemas": {
@@ -1845,6 +1845,75 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/password": {
+      "post": {
+        "summary": "Change the administrator password",
+        "description": "Changes the password of the stored administrator account. Every other\nbrowser session is signed out; the calling session stays signed in.\n\nRefused when the account comes from `APP_USERNAME` / `APP_PASSWORD`.\n",
+        "operationId": "changeAdminPassword",
+        "tags": [
+          "system"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "current_password",
+                  "new_password"
+                ],
+                "properties": {
+                  "current_password": {
+                    "type": "string"
+                  },
+                  "new_password": {
+                    "type": "string",
+                    "minLength": 8
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkTrue"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Current password incorrect, new password too short, or account set via environment variables. `error_key` identifies the case (`auth.error_current_password`, `auth.error_password_short`, `auth.error_env_credentials`).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_key": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }

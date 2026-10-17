@@ -154,16 +154,24 @@ These three items **must** be adapted before first launch — the defaults will 
 
 ### First sign-in
 
-The web interface is protected by the API key, generated automatically on first start. To open the interface the first time:
+The web interface is protected by an administrator account that you create on first start (or that you predefine with `APP_USERNAME` / `APP_PASSWORD`, in which case this step is skipped):
 
-1. Read the key from the container log — it is printed **once**, on the start that generates it:
+1. Read the one-time **setup code** from the container log:
    ```bash
-   docker logs pdf-dispatch 2>&1 | grep "API key auto-generated"
+   docker logs pdf-dispatch 2>&1 | grep "setup code"
    ```
-   It is also stored as `api_key` in `.splitter_config.json` in your data folder (or use your `API_KEY` value if you set that variable).
-2. Open `http://<host>:5880`, paste the key on the sign-in page.
+   It proves you have access to the server, so nobody else on the network can claim the instance before you. A new code is printed at each start until setup is completed.
+2. Open `http://<host>:5880`. You land on **Initial setup**: enter the code, choose a username (default `admin`) and a password (at least 8 characters).
 
-The browser then stays signed in (session cookie, 30 days by default). Use **Sign out** in the header to end the session. Regenerating the key signs every browser out.
+You are then signed in. The browser stays signed in (session cookie, renewed while you use the interface; it expires after `SESSION_LIFETIME_DAYS` of inactivity, 30 by default) and across container restarts and image updates. **Sign out** is in the header; the password can be changed in the **API access** panel.
+
+#### Resetting the administrator password
+
+If the password is lost, either:
+- set `APP_USERNAME` and `APP_PASSWORD` in the container environment and recreate it — they take precedence over the stored account; or
+- stop the container, empty the `admin_username` and `admin_password_hash` values in `.splitter_config.json`, and start it again — a new setup code is printed and the setup page reappears.
+
+Both require access to the server, as intended.
 
 ### Container hardening and resource limits
 
@@ -303,9 +311,9 @@ On first startup, pdf-dispatch creates all required subfolders inside `/data`:
 | `TZ` | `Europe/Zurich` | Container timezone |
 | `EMAIL_SECRET` | — | Encryption key for stored IMAP passwords. **Set this once and never change it** — changing it makes all stored passwords unreadable. Generate with `openssl rand -hex 32`. |
 | `APP_LANGUAGE` | `fr` | Interface language at first startup (`fr` or `en`). After first launch the saved value in the config file takes precedence. |
-| `APP_USERNAME` | — | Enables HTTP Basic auth when set together with `APP_PASSWORD` |
-| `APP_PASSWORD` | — | Password for Basic auth |
-| `API_KEY` | — | Override the auto-generated API key. If absent, a key is generated at first startup, written once to the log and stored in `.splitter_config.json`. Used both for API calls (`X-API-Key` header) and to sign in to the web interface. |
+| `APP_USERNAME` | — | Predefined administrator username (with `APP_PASSWORD`). When both are set, the first-run setup is skipped, these credentials are used on the sign-in page and accepted in an HTTP Basic `Authorization` header, and they cannot be changed from the interface. |
+| `APP_PASSWORD` | — | Predefined administrator password (see `APP_USERNAME`). Changing it signs every browser out. |
+| `API_KEY` | — | Override the auto-generated API key. If absent, a key is generated at first startup and stored in `.splitter_config.json`. The API key is for scripts and integrations (`X-API-Key` header); people sign in with the administrator account. |
 | `SESSION_LIFETIME_DAYS` | `30` | How long the web-interface session stays valid after sign-in. |
 | `SESSION_COOKIE_SECURE` | `false` | Set to `true` when the interface is served over HTTPS (e.g. behind a reverse proxy) so the session cookie is only sent over HTTPS. Leave `false` for plain HTTP on a LAN, otherwise sign-in will not stick. |
 | `POST_PROCESS_SCRIPT` | — | Path (inside the container) to a script run after every file. See [Post-processing hook](#3-post-processing-hook). |
@@ -431,7 +439,9 @@ See [Advanced — Webhook HTTP](#advanced--webhook-http) below.
 
 #### 🔑 API access
 
-Displays the current API key, with options to reveal it, copy it, or regenerate it. The key is auto-generated at first startup and stored in `.splitter_config.json`; it is also the key you enter on the sign-in page. Regenerating it immediately invalidates the old key **and signs out every browser**, including yours. To use a fixed key instead, set the `API_KEY` environment variable — regeneration from the UI is then disabled.
+Displays the current API key, with options to reveal it, copy it, or regenerate it. The key is auto-generated at first startup and stored in `.splitter_config.json`; it is meant for scripts and integrations (Home Assistant, n8n, …). Regenerating it immediately invalidates the old key for those clients; browser sessions are not affected. To use a fixed key instead, set the `API_KEY` environment variable — regeneration from the UI is then disabled.
+
+The panel also lets you **change the administrator password** (current password required). Other browsers are signed out; yours stays signed in. Not shown when the account comes from `APP_USERNAME` / `APP_PASSWORD`.
 
 See [Advanced — REST API](#advanced--rest-api) for usage.
 
@@ -649,15 +659,15 @@ pdf-dispatch exposes a REST API covering all operations available from the web i
 
 Every endpoint requires authentication except `/healthz` and the API description (`/api/openapi.json`, `/api/openapi.yaml`, `/api/docs`). Accepted credentials, checked in order:
 
-1. **API key** (for scripts and integrations): `X-API-Key: <key>` header.
+1. **API key** (recommended for scripts and integrations): `X-API-Key: <key>` header.
    The key is auto-generated at first startup and shown in the **API access** panel. Override with the `API_KEY` environment variable.
    If `X-API-Key` is present but wrong, the request is **always rejected** — no fall-through to the other methods.
 
-2. **Session cookie** (web interface): set by the sign-in page. Scripts should not rely on it — use the API key.
+2. **Session cookie** (web interface): set when the administrator signs in. Scripts should not rely on it.
 
-3. **HTTP Basic auth**: active only when both `APP_USERNAME` and `APP_PASSWORD` are set.
+3. **HTTP Basic `Authorization` header** with the administrator account (stored or `APP_USERNAME`/`APP_PASSWORD`). Useful for clients that only support Basic auth; the server never sends a Basic challenge.
 
-Unauthenticated requests get **HTTP 401** with a JSON body (`{"ok": false, "error": "Authentication required."}`), or a Basic challenge when Basic auth is configured.
+Unauthenticated requests get **HTTP 401** with a JSON body (`{"ok": false, "error": "Authentication required."}`).
 
 ### Quick start
 
@@ -757,6 +767,7 @@ The `trigger` field (no-barcode fallback) and `split_values` are independent —
 | `GET` | `/api/separator/<idx>` | Download separator PDF for trigger at index `idx` |
 | `POST` | `/api/webhook/test` | Send test payload to the configured webhook URL |
 | `POST` | `/api/settings/regenerate-api-key` | Generate a new API key |
+| `POST` | `/api/settings/password` | Change the administrator password (`current_password`, `new_password`) |
 | `POST` | `/api/retention/run` | Run one retention cleanup cycle now (see [Automatic retention](#automatic-retention)) |
 | `POST` | `/api/stats/reset` | Reset processing statistics |
 
@@ -782,11 +793,14 @@ npx @openapitools/openapi-generator-cli generate \
 ## Security
 
 - **IMAP passwords** are encrypted (Fernet/AES) with a key derived from `EMAIL_SECRET`. They are never transmitted to the browser.
-- **API key** is auto-generated at first startup if none is configured (stored in `.splitter_config.json`, printed once to the container log). Override with the `API_KEY` env var to supply it outside the config file. It cannot be changed or cleared through `POST /api/config` — only regenerated via its dedicated endpoint.
-- **No anonymous access**: once a key exists (always, after first start), every route except `/healthz`, `/login` and the API description requires the API key, a web-interface session, or Basic auth credentials.
-- **Web-interface sign-in**: the operator enters the API key once; the server sets a signed session cookie (`HttpOnly`, `SameSite=Lax`, `Secure` with `SESSION_COOKIE_SECURE=true`). The cookie holds a keyed fingerprint of the API key, never the key itself, so regenerating the key ends every session. The signing secret is generated at first start, persisted, and never exposed by the API.
+- **Two separate credentials**: people sign in with the **administrator account** (username + password); scripts and integrations use the **API key**. A leaked API key does not open the web interface, and regenerating it does not sign anyone out.
+- **First-run setup** (same approach as Jenkins): until the administrator account exists, a one-time setup code is printed in the container log and required by the setup page, so nobody else on the network can claim a fresh instance. The code is kept in memory only and is regenerated at each start until setup is completed.
+- **Administrator password** is stored as a salted **scrypt** hash (`werkzeug.security`), never in clear; minimum 8 characters. It can be changed from the interface (current password required), which signs every other browser out. `APP_USERNAME` / `APP_PASSWORD`, when set, take precedence and are never written to disk.
+- **API key** is auto-generated at first startup if none is configured (stored in `.splitter_config.json`, never written to the log). Override with the `API_KEY` env var to supply it outside the config file.
+- **No anonymous access**: every route except `/healthz`, `/login`, `/setup` and the API description requires the API key, a web-interface session, or the administrator account in a Basic header.
+- **Session cookie**: signed, `HttpOnly`, `SameSite=Lax`, `Secure` with `SESSION_COOKIE_SECURE=true`. It holds a keyed fingerprint of the current credentials — never the password — so changing the password ends every session. The signing secret is generated at first start, persisted, and never exposed by the API.
 - **CSRF protection**: write requests authenticated by the session cookie must carry an `X-Requested-With` header (added by the interface), which a foreign site cannot send without a CORS preflight; otherwise they are rejected with HTTP 403. Sign-in redirects only to local paths (no open redirect).
-- **HTTP Basic auth** (`APP_USERNAME`/`APP_PASSWORD`): optional; when both are set, browsers get the native Basic prompt instead of the sign-in page. The API key remains accepted.
+- **Protected settings**: `api_key`, the administrator account and the session secret cannot be read or changed through `POST /api/config` / `GET /api/state` — only through their dedicated endpoints (`/setup`, `/api/settings/password`, `/api/settings/regenerate-api-key`).
 - **`X-API-Key`**: if provided and invalid, the request is rejected immediately — no fall-through to the session or Basic auth.
 - **Folder paths** are validated to stay within `DATA_DIR` — path traversal is blocked.
 - **IMAP field validation** — `host`, `username`, and `folder` reject CRLF characters (`\r`, `\n`) to prevent IMAP injection. `port` is validated to `1–65535` and `poll_interval` must be ≥ 1.
@@ -802,7 +816,7 @@ npx @openapitools/openapi-generator-cli generate \
   - `MAX_CONCURRENT_PROCESSING` (default 2): limits concurrent DPI renders across all input modes (file-drop, API, email). Without this cap, simultaneous uploads saturate the CPU/RAM and make the Flask API unresponsive even for lightweight requests.
   - `API_TASK_TIMEOUT` (default 120 s): moves a task to `/error/` if processing takes too long, preventing a single stuck PDF from occupying a concurrency slot indefinitely.
   - `RETENTION_DAYS_PROCESSED` / `RETENTION_DAYS_ERROR` (**disabled by default**): the memory/CPU limits above protect against exhaustion *per request*, but `output/processed/` and `output/error/` grow indefinitely and can silently fill the disk over months — a slow denial-of-service against the volume, which on a shared NAS can also starve co-located services. Set a retention in days to bound this (see [Automatic retention](#automatic-retention)). Unlike the other limits, this one is opt-in, so the disk is **not** protected until you enable it.
-- **Basic auth transmits credentials in base64** (not encrypted). Combine with HTTPS if exposed beyond a trusted network — for example via the Synology reverse proxy (DSM → Control Panel → Application Portal → Reverse Proxy) with a Let's Encrypt certificate.
+- **Credentials travel in clear over plain HTTP** (sign-in form, Basic headers, API key). Combine with HTTPS if exposed beyond a trusted network — for example via the Synology reverse proxy (DSM → Control Panel → Application Portal → Reverse Proxy) with a Let's Encrypt certificate.
 - For SSO or multi-factor authentication, place the service behind an authentication reverse proxy (Authelia, Authentik, etc.).
 
 ### Container-level hardening
@@ -841,7 +855,7 @@ pdf-dispatch/
 │   ├── conftest.py              ← pytest fixtures (Flask test client, webhook receiver)
 │   ├── test_api.py              ← API route tests (Flask test client, 44 tests)
 │   ├── test_webhook.py          ← webhook integration tests (local HTTP receiver, 37 tests)
-│   ├── test_auth.py             ← authentication matrix: API key, session sign-in, CSRF, Basic auth
+│   ├── test_auth.py             ← authentication matrix: setup, sign-in, sessions, CSRF, password change, API key, Basic
 │   ├── test_python_core.py      ← unit tests for core Python functions (86 tests)
 │   ├── test_js_t_collision.py   ← detects t() key shadowing bugs in app.js
 │   ├── test_i18n_keys.py        ← verifies FR/EN key consistency
@@ -856,6 +870,7 @@ pdf-dispatch/
     │   ├── __init__.py     ← create_app() Application Factory
     │   ├── config.py       ← environment constants, persistent config, counter, stats
     │   ├── crypto.py       ← Fernet/AES password encryption (EMAIL_SECRET)
+    │   ├── credentials.py  ← administrator account, scrypt hashing, first-run setup code
     │   ├── i18n.py         ← translation loader and t() function
     │   ├── state.py        ← in-memory shared state (locks, log, task tracking)
     │   ├── hook.py         ← post-processing hook (POST_PROCESS_SCRIPT)
@@ -865,7 +880,7 @@ pdf-dispatch/
     │   ├── email_poller.py ← background IMAP poller (threading, deduplication, limits)
     │   ├── watcher.py      ← watchdog observer on /data/input/, startup scan
     │   └── routes/         ← Flask Blueprints (one per concern)
-    │       ├── auth.py         ← before_app_request (X-API-Key, session, Basic auth) + /login, /logout
+    │       ├── auth.py         ← before_app_request (X-API-Key, session, Basic header) + /setup, /login, /logout, /api/settings/password
     │       ├── docs.py         ← /healthz, /api/runtime, /api/openapi.*, /api/docs
     │       ├── core.py         ← /api/state, /api/config, /api/log, /api/dirs, /api/recent, /api/retention/run
     │       ├── upload.py       ← /api/upload, /api/tasks, /api/file
@@ -879,7 +894,8 @@ pdf-dispatch/
     │   └── check_keys.py   ← verifies key consistency between FR/EN files
     ├── templates/
     │   ├── index.html      ← single-page app HTML skeleton (rendered with Jinja2)
-    │   └── login.html      ← web-interface sign-in page (API key → session cookie)
+    │   ├── login.html      ← web-interface sign-in page (administrator account → session cookie)
+    │   └── setup.html      ← first-run setup page (one-time code → administrator account)
     └── static/
         ├── css/style.css   ← theme (CSS variables, layout)
         └── js/app.js       ← all frontend logic (no build step, no dependencies)
@@ -904,7 +920,8 @@ re-exports symbols for the test suite. The application logic lives in the
 | `retention.py` | Background retention thread: deletes files older than `RETENTION_DAYS_*` from `output/processed/` and `output/error/`, prunes emptied per-trigger subfolders; on-demand cycle for `/api/retention/run` |
 | `email_poller.py` | Background IMAP thread: polling, filters, attachment download, Message-ID deduplication, retention limits |
 | `watcher.py` | `watchdog.Observer` on `/data/input/`, processing thread pool, startup scan and banner |
-| `routes/auth.py` | `before_app_request` hook (X-API-Key, then session cookie, then HTTP Basic auth; CSRF check for session writes) and the `/login` / `/logout` routes |
+| `credentials.py` | Administrator account (stored scrypt hash or `APP_USERNAME`/`APP_PASSWORD`), credential verification, one-time first-run setup code |
+| `routes/auth.py` | `before_app_request` hook (X-API-Key, then session cookie, then Basic header; CSRF check for session writes), `/setup`, `/login`, `/logout`, `/api/settings/password` |
 | `routes/docs.py` | `/healthz`, `/api/runtime`, `/api/openapi.*`, `/api/docs` |
 | `routes/core.py` | `/api/state`, `/api/config`, `/api/log`, `/api/dirs/*`, `/api/recent`, `/api/retention/run`, `/api/stats/reset` |
 | `routes/upload.py` | `/api/upload`, `/api/tasks`, `/api/file/<path>` |

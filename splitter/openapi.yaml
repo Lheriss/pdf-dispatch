@@ -15,27 +15,28 @@ info:
 
     Every endpoint requires authentication except `/healthz` and this API
     description (`/api/openapi.json`, `/api/openapi.yaml`, `/api/docs`).
-    Accepted credentials, checked in order:
+    Two kinds of credentials exist: the **API key** for scripts and
+    integrations, and the **administrator account** (username + password)
+    for people using the web interface. Accepted, checked in order:
 
-    1. **API key** *(for scripts and integrations)*: `X-API-Key: <key>` header.  
-       The key is auto-generated on first start, written once to the container
-       log, stored in `.splitter_config.json` and shown in the *API access*
-       section of the web interface. Override with the `API_KEY` environment
-       variable. A wrong key is **always rejected** — no fall-through to the
-       other methods.
+    1. **API key** *(recommended for scripts)*: `X-API-Key: <key>` header.  
+       Auto-generated on first start, stored in `.splitter_config.json` and
+       shown in the *API access* section of the web interface. Override with
+       the `API_KEY` environment variable. A wrong key is **always rejected**
+       — no fall-through to the other methods.
 
-    2. **Session cookie** *(web interface)*: obtained by entering the API key
-       on the `/login` page. State-changing requests (`POST`, `PUT`, `DELETE`)
+    2. **Session cookie** *(web interface)*: set when the administrator signs
+       in on `/login`. State-changing requests (`POST`, `PUT`, `DELETE`)
        authenticated this way must also send an `X-Requested-With` header
-       (CSRF protection), otherwise they get HTTP 403. Regenerating the API key
-       ends every session.
+       (CSRF protection), otherwise they get HTTP 403. Changing the password
+       ends every session; regenerating the API key does not.
 
-    3. **HTTP Basic auth**: active only when both `APP_USERNAME` and
-       `APP_PASSWORD` environment variables are set.
+    3. **HTTP Basic `Authorization` header** with the administrator account
+       (created on the first-run `/setup` page, or `APP_USERNAME` /
+       `APP_PASSWORD`). The server never sends a Basic challenge.
 
     Unauthenticated requests get HTTP 401 with a JSON body
-    (`{"ok": false, "error": "Authentication required."}`), or a Basic
-    challenge when Basic auth is configured.
+    (`{"ok": false, "error": "Authentication required."}`).
 
   contact:
     name: pdf-dispatch on GitHub
@@ -84,14 +85,14 @@ components:
       in: cookie
       name: pdf_dispatch_session
       description: >
-        Signed session cookie set by the web-interface sign-in page (`/login`).
+        Signed session cookie set when the administrator signs in on `/login`.
         Write requests using it must also send `X-Requested-With`.
     basicAuth:
       type: http
       scheme: basic
       description: >
-        Active only when both `APP_USERNAME` and `APP_PASSWORD` environment
-        variables are set.
+        The administrator account (created on the first-run setup page, or
+        `APP_USERNAME` / `APP_PASSWORD`). Accepted when sent; never solicited.
 
   schemas:
 
@@ -1212,6 +1213,47 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
+
+  /api/settings/password:
+    post:
+      summary: Change the administrator password
+      description: |
+        Changes the password of the stored administrator account. Every other
+        browser session is signed out; the calling session stays signed in.
+
+        Refused when the account comes from `APP_USERNAME` / `APP_PASSWORD`.
+      operationId: changeAdminPassword
+      tags: [system]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: {type: string}
+                new_password: {type: string, minLength: 8}
+      responses:
+        "200":
+          description: Password changed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OkTrue"}
+        "400":
+          description: >
+            Current password incorrect, new password too short, or account
+            set via environment variables. `error_key` identifies the case
+            (`auth.error_current_password`, `auth.error_password_short`,
+            `auth.error_env_credentials`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:        {type: boolean, enum: [false]}
+                  error:     {type: string}
+                  error_key: {type: string}
 
   /api/stats/reset:
     post:
