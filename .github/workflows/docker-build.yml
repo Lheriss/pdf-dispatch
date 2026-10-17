@@ -64,6 +64,11 @@ jobs:
       - name: JS functional tests
         run: node tests/test_js_functional.js
 
+      - name: API, webhook and authentication tests (pytest)
+        run: |
+          pip install pytest
+          python3 -m pytest -q
+
       # -- Docker ------------------------------------------------------------
 
       # QEMU provides CPU emulation so Buildx can build the linux/arm64 image
