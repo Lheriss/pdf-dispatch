@@ -184,7 +184,7 @@ grow without bound and can silently fill the disk. Set a retention in days
 to have old files deleted automatically by a background thread:
 
 | Variable | Applies to | Default |
-|----------|-----------|---------|
+|----------|-----------|--------|
 | `RETENTION_DAYS_PROCESSED` | `/data/output/processed/` | `0` (keep forever) |
 | `RETENTION_DAYS_ERROR` | `/data/output/error/` | `0` (keep forever) |
 | `RETENTION_SCAN_INTERVAL` | seconds between cleanup scans | `21600` (6h) |
@@ -211,7 +211,7 @@ The `cap_drop: ALL` + `cap_add` block retains only the five capabilities
 actually used during that startup phase:
 
 | Capability | Used for |
-|------------|----------|
+|------------|---------|
 | `CHOWN` | `chown /data` to PUID/PGID |
 | `SETUID` / `SETGID` | `gosu` identity switch |
 | `DAC_OVERRIDE` | Override permissions when `chown` sees files owned by another UID |
@@ -334,7 +334,7 @@ The trigger list defines which barcode/QR code values cause a split. If the list
 Each trigger in the list shows indicator badges:
 
 | Badge | Meaning |
-|-------|---------|
+|-------|--------|
 | `~` | Glob pattern |
 | `Aa` | Case-insensitive matching active |
 | `✂` | Separator page will be deleted |
@@ -470,7 +470,7 @@ Shows recent events: file processing, configuration changes, email polling, erro
 ### Special cases
 
 | Situation | Behaviour |
-|-----------|-----------|
+|-----------|----------|
 | PDF with no trigger code | Copied to `/data/output/no_code/` |
 | Corrupted or unreadable PDF | Moved to `/data/output/error/` |
 | Non-PDF file | Moved to `/data/output/error/` |
@@ -765,9 +765,9 @@ npx @openapitools/openapi-generator-cli generate \
 ## Security
 
 - **IMAP passwords** are encrypted (Fernet/AES) with a key derived from `EMAIL_SECRET`. They are never transmitted to the browser.
-- **API key** is stored in `.splitter_config.json`. Override with `API_KEY` env var to keep it out of the config file.
-- **HTTP Basic auth** (`APP_USERNAME`/`APP_PASSWORD`): when both are set, every route (except `/healthz`) requires authentication. Without them, the interface is open.
-- **`X-API-Key`**: if provided and invalid, the request is rejected immediately — no fall-through to Basic auth.
+- **API key** is auto-generated at startup if none is configured (stored in `.splitter_config.json`). Retrieve it from the web UI under **Settings → API Key**. Override with the `API_KEY` env var to supply it outside the config file.
+- **HTTP Basic auth** (`APP_USERNAME`/`APP_PASSWORD`): when both are set, every route (except `/healthz`) requires authentication. Without them, routes are protected by the API key (auto-generated at startup).
+- **`X-API-Key`**: if provided and invalid, the request is rejected immediately — no fall-through to Basic auth. If omitted while an API key is configured, the request is also rejected (anonymous access is not allowed once a key exists).
 - **Folder paths** are validated to stay within `DATA_DIR` — path traversal is blocked.
 - **IMAP field validation** — `host`, `username`, and `folder` reject CRLF characters (`\r`, `\n`) to prevent IMAP injection. `port` is validated to `1–65535` and `poll_interval` must be ≥ 1.
 - **`password_enc`** is never returned by any API endpoint — the encrypted field is stripped before serialisation.
@@ -909,8 +909,7 @@ import yaml, json
 json.dump(
   yaml.safe_load(open('splitter/openapi.yaml')),
   open('splitter/openapi.json', 'w'),
-  ensure_ascii=False, indent=2
-)"
+  ensure_ascii=False, indent=2)"
 ```
 
 ### Running tests locally
@@ -941,4 +940,3 @@ GitHub Actions (`.github/workflows/docker-build.yml`) runs on pushes to `main` a
    - push of a `v*` tag → `:latest` + `:vX.Y.Z` + `:<sha8>`
 
 The `:<sha8>` tag (short commit SHA) is published on every push, giving a unique immutable reference for each build. Pin production to a `:vX.Y.Z` tag for a fixed, traceable version.
-
