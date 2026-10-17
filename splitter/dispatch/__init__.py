@@ -5,7 +5,8 @@ Application Factory for pdf-dispatch.
 
 create_app() is the sole public entry point for building the Flask instance.
 It encapsulates app creation, request-size configuration, the 413 error
-handler, authentication logging, and Blueprint registration.
+handler, authentication logging, Blueprint registration, and the one-time
+API key generation that closes the anonymous-access window on first startup.
 
 Usage:
     from dispatch import create_app
@@ -26,7 +27,8 @@ def create_app() -> Flask:
 
     Can be called multiple times (e.g. in unit tests) without global
     side-effects: each call returns an independent instance with its
-    own routes and error handlers.
+    own routes and error handlers.  _ensure_api_key() is idempotent
+    (no-op when a key already exists) so multiple calls are safe.
 
     Returns the fully configured Flask application.
     """
@@ -68,9 +70,9 @@ def create_app() -> Flask:
         )
     else:
         log.info(
-            "No authentication configured "
+            "No Basic authentication configured "
             "(APP_USERNAME/APP_PASSWORD not set). "
-            "See the README to secure access if needed."
+            "API key authentication is active (see Settings → API Key)."
         )
 
     # ── Blueprints ────────────────────────────────────────────────────────
@@ -91,5 +93,13 @@ def create_app() -> Flask:
     app.register_blueprint(separator_bp)
     app.register_blueprint(webhook_bp)
     app.register_blueprint(detect_bp)
+
+    # ── First-startup API key generation ─────────────────────────────────
+    # Generate and persist a random API key if none is configured yet.
+    # Must run after blueprints (so auth_bp.before_app_request is registered)
+    # and before the server starts serving connections.
+    # Idempotent: no-op when API_KEY env var is set or a key already exists.
+    from dispatch.config import _ensure_api_key
+    _ensure_api_key()
 
     return app

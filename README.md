@@ -765,9 +765,9 @@ npx @openapitools/openapi-generator-cli generate \
 ## Security
 
 - **IMAP passwords** are encrypted (Fernet/AES) with a key derived from `EMAIL_SECRET`. They are never transmitted to the browser.
-- **API key** is stored in `.splitter_config.json`. Override with `API_KEY` env var to keep it out of the config file.
-- **HTTP Basic auth** (`APP_USERNAME`/`APP_PASSWORD`): when both are set, every route (except `/healthz`) requires authentication. Without them, the interface is open.
-- **`X-API-Key`**: if provided and invalid, the request is rejected immediately — no fall-through to Basic auth.
+- **API key** is auto-generated at startup if none is configured (stored in `.splitter_config.json`). Retrieve it from the web UI under **Settings → API Key**. Override with the `API_KEY` env var to supply it outside the config file.
+- **HTTP Basic auth** (`APP_USERNAME`/`APP_PASSWORD`): when both are set, every route (except `/healthz`) requires authentication. Without them, routes are protected by the API key (auto-generated at startup).
+- **`X-API-Key`**: if provided and invalid, the request is rejected immediately — no fall-through to Basic auth. If omitted while an API key is configured, the request is also rejected (anonymous access is not allowed once a key exists).
 - **Folder paths** are validated to stay within `DATA_DIR` — path traversal is blocked.
 - **IMAP field validation** — `host`, `username`, and `folder` reject CRLF characters (`\r`, `\n`) to prevent IMAP injection. `port` is validated to `1–65535` and `poll_interval` must be ≥ 1.
 - **`password_enc`** is never returned by any API endpoint — the encrypted field is stripped before serialisation.
