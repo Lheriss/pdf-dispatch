@@ -13,18 +13,29 @@ info:
 
     ## Authentication
 
-    All endpoints except `/healthz` support two methods (checked in order):
+    Every endpoint requires authentication except `/healthz` and this API
+    description (`/api/openapi.json`, `/api/openapi.yaml`, `/api/docs`).
+    Accepted credentials, checked in order:
 
-    1. **API key** *(recommended for scripts)*: `X-API-Key: <key>` header.  
-       The key is auto-generated at startup and shown in the *API access* section
-       of the web interface. Override with the `API_KEY` environment variable.
+    1. **API key** *(for scripts and integrations)*: `X-API-Key: <key>` header.  
+       The key is auto-generated on first start, written once to the container
+       log, stored in `.splitter_config.json` and shown in the *API access*
+       section of the web interface. Override with the `API_KEY` environment
+       variable. A wrong key is **always rejected** — no fall-through to the
+       other methods.
 
-    2. **HTTP Basic auth**: active only when both `APP_USERNAME` and
+    2. **Session cookie** *(web interface)*: obtained by entering the API key
+       on the `/login` page. State-changing requests (`POST`, `PUT`, `DELETE`)
+       authenticated this way must also send an `X-Requested-With` header
+       (CSRF protection), otherwise they get HTTP 403. Regenerating the API key
+       ends every session.
+
+    3. **HTTP Basic auth**: active only when both `APP_USERNAME` and
        `APP_PASSWORD` environment variables are set.
 
-    If neither is configured the API is open (trusted network assumption).
-    If `X-API-Key` is present but wrong the request is **always rejected**
-    — there is no fall-through to Basic auth.
+    Unauthenticated requests get HTTP 401 with a JSON body
+    (`{"ok": false, "error": "Authentication required."}`), or a Basic
+    challenge when Basic auth is configured.
 
   contact:
     name: pdf-dispatch on GitHub
@@ -55,8 +66,8 @@ tags:
 
 security:
   - apiKey: []
+  - sessionCookie: []
   - basicAuth: []
-  - {}
 
 components:
   securitySchemes:
@@ -68,6 +79,13 @@ components:
         Auto-generated 64-character hex key. Visible (and regeneratable) in
         the *API access* section of the web interface. Override with the
         `API_KEY` environment variable.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: pdf_dispatch_session
+      description: >
+        Signed session cookie set by the web-interface sign-in page (`/login`).
+        Write requests using it must also send `X-Requested-With`.
     basicAuth:
       type: http
       scheme: basic

@@ -3,7 +3,7 @@
   "info": {
     "title": "pdf-dispatch",
     "version": "1.26.0",
-    "description": "Self-hosted PDF splitting service. Watches a folder, splits multi-page\nPDFs on barcode/QR code detection, and routes output documents by trigger code.\n\nConfigurable entirely from the web interface; every setting is also accessible\nvia this REST API, making pdf-dispatch scriptable from Home Assistant, n8n,\nNode-RED, shell scripts, and any HTTP client.\n\n## Authentication\n\nAll endpoints except `/healthz` support two methods (checked in order):\n\n1. **API key** *(recommended for scripts)*: `X-API-Key: <key>` header.  \n   The key is auto-generated at startup and shown in the *API access* section\n   of the web interface. Override with the `API_KEY` environment variable.\n\n2. **HTTP Basic auth**: active only when both `APP_USERNAME` and\n   `APP_PASSWORD` environment variables are set.\n\nIf neither is configured the API is open (trusted network assumption).\nIf `X-API-Key` is present but wrong the request is **always rejected**\n— there is no fall-through to Basic auth.\n",
+    "description": "Self-hosted PDF splitting service. Watches a folder, splits multi-page\nPDFs on barcode/QR code detection, and routes output documents by trigger code.\n\nConfigurable entirely from the web interface; every setting is also accessible\nvia this REST API, making pdf-dispatch scriptable from Home Assistant, n8n,\nNode-RED, shell scripts, and any HTTP client.\n\n## Authentication\n\nEvery endpoint requires authentication except `/healthz` and this API\ndescription (`/api/openapi.json`, `/api/openapi.yaml`, `/api/docs`).\nAccepted credentials, checked in order:\n\n1. **API key** *(for scripts and integrations)*: `X-API-Key: <key>` header.  \n   The key is auto-generated on first start, written once to the container\n   log, stored in `.splitter_config.json` and shown in the *API access*\n   section of the web interface. Override with the `API_KEY` environment\n   variable. A wrong key is **always rejected** — no fall-through to the\n   other methods.\n\n2. **Session cookie** *(web interface)*: obtained by entering the API key\n   on the `/login` page. State-changing requests (`POST`, `PUT`, `DELETE`)\n   authenticated this way must also send an `X-Requested-With` header\n   (CSRF protection), otherwise they get HTTP 403. Regenerating the API key\n   ends every session.\n\n3. **HTTP Basic auth**: active only when both `APP_USERNAME` and\n   `APP_PASSWORD` environment variables are set.\n\nUnauthenticated requests get HTTP 401 with a JSON body\n(`{\"ok\": false, \"error\": \"Authentication required.\"}`), or a Basic\nchallenge when Basic auth is configured.\n",
     "contact": {
       "name": "pdf-dispatch on GitHub",
       "url": "https://github.com/Lheriss/pdf-dispatch"
@@ -54,9 +54,11 @@
       "apiKey": []
     },
     {
-      "basicAuth": []
+      "sessionCookie": []
     },
-    {}
+    {
+      "basicAuth": []
+    }
   ],
   "components": {
     "securitySchemes": {
@@ -65,6 +67,12 @@
         "in": "header",
         "name": "X-API-Key",
         "description": "Auto-generated 64-character hex key. Visible (and regeneratable) in the *API access* section of the web interface. Override with the `API_KEY` environment variable.\n"
+      },
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "pdf_dispatch_session",
+        "description": "Signed session cookie set by the web-interface sign-in page (`/login`). Write requests using it must also send `X-Requested-With`.\n"
       },
       "basicAuth": {
         "type": "http",
