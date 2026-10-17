@@ -53,7 +53,9 @@ services:
       # Set EMAIL_SECRET in Portainer's "Environment variables" section.
       EMAIL_SECRET: "${EMAIL_SECRET:-}"
 
-      # HTTP Basic authentication (optional).
+      # HTTP Basic authentication (optional). Without it, the web interface
+      # asks for the API key, printed once in the log on first start:
+      #   docker logs pdf-dispatch 2>&1 | grep "API key auto-generated"
       # APP_USERNAME: "${APP_USERNAME:-}"
       # APP_PASSWORD: "${APP_PASSWORD:-}"
 

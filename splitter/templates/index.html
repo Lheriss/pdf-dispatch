@@ -29,6 +29,11 @@
   <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="11" width="7" height="2"/><rect x="10" y="5" width="2" height="14"/><rect x="14" y="5" width="8" height="2"/><rect x="14" y="11" width="8" height="2"/><rect x="14" y="17" width="8" height="2"/></svg></div>
   <h1 data-i18n="app.title">PDF-DISPATCH</h1>
   <div class="sdot" role="status" aria-live="polite"><div class="dot" id="sdot" aria-hidden="true"></div><span id="stext">actif</span></div>
+  {% if show_logout %}
+  <form method="post" action="/logout" class="logout-form">
+    <button type="submit" class="btn secondary" data-i18n="auth.logout">Sign out</button>
+  </form>
+  {% endif %}
 </header>
 
 <main>

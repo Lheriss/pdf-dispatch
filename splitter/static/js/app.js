@@ -42,6 +42,37 @@
 // v1.15.1 release history for a real case).
 // =============================================================================
 
+// ── Authenticated fetch ───────────────────────────────────────────────────
+// Every call below goes through fetch(). This wrapper, installed once:
+//   - adds X-Requested-With to state-changing requests; the server requires it
+//     for requests authenticated by the session cookie (CSRF protection — a
+//     foreign site cannot set this header without a CORS preflight);
+//   - sends the browser back to the sign-in page when the session has expired
+//     or the API key was regenerated (HTTP 401 without a Basic challenge).
+(function installAuthFetch() {
+  const g = (typeof globalThis !== 'undefined') ? globalThis : window;
+  const origFetch = g.fetch;
+  if (typeof origFetch !== 'function') return;
+  g.fetch = function (input, init) {
+    const opts = Object.assign({}, init || {});
+    const method = (opts.method || 'GET').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+      if (typeof Headers !== 'undefined' && opts.headers instanceof Headers) {
+        opts.headers.set('X-Requested-With', 'pdf-dispatch');
+      } else {
+        opts.headers = Object.assign({}, opts.headers || {}, {'X-Requested-With': 'pdf-dispatch'});
+      }
+    }
+    return origFetch.call(g, input, opts).then(r => {
+      const basic = r && r.headers && typeof r.headers.get === 'function' && r.headers.get('WWW-Authenticate');
+      if (r && r.status === 401 && !basic && g.location && typeof g.location.assign === 'function') {
+        g.location.assign('/login?next=' + encodeURIComponent(g.location.pathname || '/'));
+      }
+      return r;
+    });
+  };
+})();
+
 // ── Local state ───────────────────────────────────────────────────────────
 let cfg = {};
 let dragSrc = null;
