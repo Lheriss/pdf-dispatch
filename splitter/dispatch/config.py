@@ -13,6 +13,7 @@ Contains:
   - Trigger matching: _is_glob_pattern(), _match_trigger().
   - Document counter: _counter_persist/load/next.
   - Persisted statistics: _load_stats(), _save_stats().
+  - First-startup key generation: _ensure_api_key().
 
 Internal dependencies: dispatch.i18n (t()).
 No dependency on state.py or routes — this module is imported by almost
@@ -24,6 +25,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import uuid
 from pathlib import Path
@@ -171,7 +173,7 @@ CONFIG_DEFAULTS = {
     "webhook_url":     "",
     "webhook_secret":  "",
     "webhook_events":  "all",             # "all" | "success" | "error"
-    # API key (auto-generated; overridable via API_KEY env var)
+    # API key (auto-generated at startup; overridable via API_KEY env var)
     "api_key": "",
     # filename tokens: order = list, each token = dict
     # type: trigger | string | timestamp | counter
@@ -570,6 +572,43 @@ def update_config(partial: dict) -> dict:
         return cfg
 
 
+def _ensure_api_key() -> None:
+    """Auto-generate and persist an API key if none is configured.
+
+    Called once from create_app() before the HTTP server starts accepting
+    requests.  This ensures that the window during which anonymous requests
+    are silently allowed (api_key == "" in CONFIG_DEFAULTS) is closed as
+    early as possible — at process startup rather than when the operator
+    manually clicks "Regenerate API key" in the web interface.
+
+    Skipped when:
+      - The API_KEY environment variable is set (it already provides a key
+        and takes precedence over the stored one in auth.py).
+      - A non-empty api_key already exists in the persistent config
+        (idempotent: subsequent calls from unit tests are no-ops).
+
+    The generated key is a 64-character hex string (secrets.token_hex(32)),
+    identical in format to keys produced by /api/settings/regenerate-api-key.
+    It is persisted to .splitter_config.json and logged at INFO level so the
+    operator can retrieve it without accessing the web interface.
+    """
+    if os.getenv("API_KEY", "").strip():
+        # API_KEY env var is set — it is the authoritative key; nothing to do.
+        return
+    cfg = get_config()
+    if cfg.get("api_key", "").strip():
+        # A key already exists in the persistent config — no-op.
+        return
+    new_key = secrets.token_hex(32)
+    update_config({"api_key": new_key})
+    log.info(
+        "API key auto-generated at startup. "
+        "Retrieve it from the web interface under Settings \u2192 API Key, "
+        "or from %s.",
+        CONFIG_FILE,
+    )
+
+
 _counter_lock  = threading.Lock()
 _counter_value: int | None = None   # in-memory counter; None = not yet loaded
 
@@ -636,4 +675,3 @@ def _save_stats(stats: dict):
         update_config({"stats": stats})
     except Exception as e:
         log.warning(f"Could not save stats: {e}")
-
