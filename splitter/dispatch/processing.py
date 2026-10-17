@@ -494,6 +494,8 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
     trigger_map : list of {value, page_handling, case_sensitive} dicts.
     separator_placement : "before" or "after" (global option).
     Returns : list of {page (0-indexed), value, matched_pattern, page_handling}
+              page_handling "drop" marks an extra blank page of a separator run:
+              not a split point, just removed from the output (see process_file).
 
     Effective page_handling (placement × per-trigger keep/delete):
       before + keep   → "start"      (separator is first page of document)
@@ -536,8 +538,12 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
     # with NO barcode are considered (a page can't be both a code and blank).
     # Consecutive blanks (e.g. the back side of a duplex-scanned separator) are
     # grouped: only the FIRST blank of each run triggers a split, so a two-sided
-    # blank separator produces a single cut, not two.
-    blank_pages: set[int] = set()
+    # blank separator produces a single cut, not two. The other blanks of the
+    # run are still separator sheets and must be discarded too: they are
+    # reported as "drop" hits (removed from the output, no split) — previously
+    # they were left as ordinary pages and ended up in the next document.
+    blank_pages: set[int] = set()        # first blank of each run → split
+    blank_run_tail: set[int] = set()     # following blanks of the run → drop
     if BLANK_PAGE_SPLIT:
         raw_blanks = []
         for i in range(n_pages):
@@ -545,12 +551,13 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
                 continue
             if is_blank_page(images_fast[i]):
                 raw_blanks.append(i)
-        # Keep only the first page of each consecutive run.
         for idx, p in enumerate(raw_blanks):
             if idx == 0 or p != raw_blanks[idx - 1] + 1:
                 blank_pages.add(p)
                 log_event("info", t("log.blank_page_detected", page=p + 1),
                           pdf_path.name, verbose=True)
+            else:
+                blank_run_tail.add(p)
 
     # ── Trigger matching ──────────────────────────────────────────────────────
     # Only positive pages carry codes; negative (content) pages produce no hits.
@@ -647,6 +654,15 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
                 "value":           BLANK_TRIGGER,
                 "matched_pattern": BLANK_TRIGGER,
                 "page_handling":   "end_delete" if separator_placement == "after" else "delete",
+            })
+
+        # Further blank pages of the same run: discarded without a new split.
+        elif i in blank_run_tail:
+            hits.append({
+                "page":            i,
+                "value":           BLANK_TRIGGER,
+                "matched_pattern": BLANK_TRIGGER,
+                "page_handling":   "drop",
             })
     return hits
 
@@ -1012,6 +1028,11 @@ def process_file(pdf_path: Path):
 
         splits = find_split_pages(pdf_path, trigger_map, sep_placement)
 
+        # "drop" hits (extra blank pages of a separator run) are not split
+        # points: remove them from the hit list and from every output document.
+        drop_pages = {h["page"] for h in splits if h.get("page_handling") == "drop"}
+        splits = [h for h in splits if h.get("page_handling") != "drop"]
+
         # Check deadline after rendering — guards against very slow scans.
         if time.monotonic() > _task_deadline:
             _reason = f"Processing timeout ({API_TASK_TIMEOUT}s): {fname}"
@@ -1134,7 +1155,7 @@ def process_file(pdf_path: Path):
         hook_triggers = []   # trigger codes detected (for hook)
 
         for spec in output_specs:
-            page_indices    = spec["pages"]
+            page_indices    = [p for p in spec["pages"] if p not in drop_pages]
             trigger         = spec["trigger"]
             matched_pattern = spec["pattern"]
 

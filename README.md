@@ -381,7 +381,7 @@ Instead of printed barcode sheets, you can separate documents with a **plain bla
 
 Detection is designed for real scans, not just pristine PDFs: it measures the fraction of "ink" pixels on the page (`ink_ratio`) using a threshold **relative to the page's own average brightness**, so recycled or cream paper is handled, and it crops the page margins and ignores isolated specks so scanner edge streaks and dust don't count as content. A page is treated as blank when its `ink_ratio` falls below `BLANK_PAGE_THRESHOLD` (default `0.005`).
 
-**Consecutive blanks are grouped**: the back side of a duplex-scanned separator (two blank pages in a row) produces a single split, not two.
+**Consecutive blanks are grouped**: the back side of a duplex-scanned separator (two blank pages in a row) produces a single split, not two, and every blank sheet of the run is discarded.
 
 > **Reserved value `blank`.** You cannot create a trigger whose value is `blank` (it is rejected on save). If a real barcode happens to encode the literal text `blank` — or `no_code` — and is matched by a trigger (including a glob such as `*`), it is still split on normally, but its filename token is written as `code_blank` (resp. `code_no_code`) so it can't be confused with a blank-page separator. Real separators keep the `blank` value.
 
