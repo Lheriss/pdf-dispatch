@@ -564,6 +564,30 @@ async function copyApiKey() {
   } catch(e) { console.error('Copy failed:', e); }
 }
 
+// Administrator password (only rendered for a session sign-in with stored
+// credentials — see index() in routes/core.py). Other browsers are signed out
+// server-side; this session stays signed in.
+async function changePassword() {
+  const cur = document.getElementById('pw-current');
+  const nw  = document.getElementById('pw-new');
+  const st  = document.getElementById('pw-status');
+  if (!cur || !nw || !st) return;
+  try {
+    const r = await fetch('/api/settings/password', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({current_password: cur.value, new_password: nw.value})});
+    const d = await r.json();
+    if (d.ok) {
+      cur.value = ''; nw.value = '';
+      st.textContent = t('auth.pw_changed'); st.style.color = 'var(--accent)';
+    } else {
+      st.textContent = t(d.error_key || 'auth.error_current_password'); st.style.color = 'var(--error)';
+    }
+  } catch (e) {
+    st.textContent = e.message; st.style.color = 'var(--error)';
+  }
+}
+
 async function regenerateApiKey() {
   if (_apiKeyEnvSet) return;
   if (!confirm(t('apikey.regenerate_confirm'))) return;

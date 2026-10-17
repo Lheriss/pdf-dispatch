@@ -178,6 +178,10 @@ CONFIG_DEFAULTS = {
     # Secret used to sign web-interface session cookies (auto-generated at
     # startup, never sent to the browser, never settable via POST /api/config)
     "session_secret": "",
+    # Web-interface administrator (created on the /setup page; overridden by
+    # APP_USERNAME/APP_PASSWORD). Only a scrypt hash of the password is kept.
+    "admin_username": "",
+    "admin_password_hash": "",
     # filename tokens: order = list, each token = dict
     # type: trigger | string | timestamp | counter
     # Tokens of type "string" may appear multiple times (unique id required)
@@ -399,8 +403,9 @@ def _validate_and_sanitize_config(cfg: dict) -> dict:
         cfg["webhook_events"] = "all"
     if not isinstance(cfg.get("api_key"), str):
         cfg["api_key"] = ""
-    if not isinstance(cfg.get("session_secret"), str):
-        cfg["session_secret"] = ""
+    for _k in ("session_secret", "admin_username", "admin_password_hash"):
+        if not isinstance(cfg.get(_k), str):
+            cfg[_k] = ""
 
     if cfg.get("separator_placement") not in ("before", "after"):
         if "separator_placement" in cfg:
@@ -594,10 +599,10 @@ def _ensure_api_key() -> None:
 
     The generated key is a 64-character hex string (secrets.token_hex(32)),
     identical in format to keys produced by /api/settings/regenerate-api-key.
-    It is persisted to .splitter_config.json and written to the log once,
-    at generation time, so the operator can sign in to the web interface on
-    first start (the interface itself requires the key).  It is never logged
-    again on later starts.
+    It is persisted to .splitter_config.json and shown in the web interface
+    (API access panel) once signed in.  It is a machine credential for
+    scripts and integrations; people sign in with the administrator account
+    (see dispatch/credentials.py), so the key is never written to the log.
     """
     if os.getenv("API_KEY", "").strip():
         # API_KEY env var is set — it is the authoritative key; nothing to do.
@@ -608,12 +613,9 @@ def _ensure_api_key() -> None:
         return
     new_key = secrets.token_hex(32)
     update_config({"api_key": new_key})
-    log.warning(
-        "API key auto-generated on first start: %s  "
-        "Use it to sign in to the web interface; it is also stored in %s. "
-        "This message is shown only once.",
-        new_key,
-        CONFIG_FILE,
+    log.info(
+        "API key generated for scripts and integrations "
+        "(shown in the web interface under API access)."
     )
 
 

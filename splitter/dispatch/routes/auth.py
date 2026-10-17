@@ -1,27 +1,31 @@
 """
 dispatch/routes/auth.py
-Global authentication hook and web-interface login.
+Global authentication hook, first-run setup, sign-in and sign-out.
 
 Registered via @bp.before_app_request so it applies to all blueprints.
 
-Accepted credentials, checked in this order:
-  1. X-API-Key header — for scripts and integrations.  A wrong key is
-     always rejected (no fall-through to the other methods).
-  2. Session cookie — set by POST /login after the operator enters the API
-     key in the web interface.  The session carries a fingerprint of the key,
-     so regenerating the key signs every browser out.
-  3. HTTP Basic auth — when both APP_USERNAME and APP_PASSWORD are set.
+Two kinds of credentials (see dispatch/credentials.py):
+  • People use the administrator account (username + password) on the
+    /login page and get a signed session cookie.
+  • Scripts and integrations use the API key in the X-API-Key header, or
+    the administrator account through an HTTP Basic Authorization header.
 
-Unauthenticated requests are rejected whenever an API key exists (which is
-always the case after first start): browsers asking for a page are
-redirected to /login, everything else gets HTTP 401.  Only when no key and
-no Basic credentials exist at all is access left open.
+Checks, in order:
+  1. X-API-Key header — a wrong key is always rejected (no fall-through).
+  2. Session cookie — carries a keyed fingerprint of the current
+     credentials, so changing the password signs every browser out.
+     Regenerating the API key does not.
+  3. HTTP Basic Authorization header — checked against the administrator
+     account; never solicited (no WWW-Authenticate challenge), so browsers
+     do not pop up their native dialog.
+
+Unauthenticated page loads redirect to /login (or /setup while no account
+exists); everything else gets a JSON 401.
 
 Cross-site request forgery: a request authenticated by the session cookie
 and using a state-changing method must carry the X-Requested-With header,
 which app.js adds to every call and which another site cannot set without
-a CORS preflight that this server never grants.  Requests authenticated by
-X-API-Key or Basic auth are not cookie-based and need no such header.
+a CORS preflight that this server never grants.
 """
 import hashlib
 import hmac
@@ -29,9 +33,10 @@ import os
 import secrets
 from urllib.parse import urlsplit
 
-from flask import (Blueprint, Response, jsonify, redirect, render_template,
-                   request, session, url_for)
+from flask import (Blueprint, jsonify, redirect, render_template, request,
+                   session, url_for)
 
+from dispatch import credentials as creds
 from dispatch.config import DEFAULT_LANGUAGE, get_config
 from dispatch.i18n import TRANSLATIONS
 
@@ -39,14 +44,14 @@ bp = Blueprint("auth", __name__)
 
 # Paths reachable without any credential.  The API description and its
 # Swagger UI contain no secret and are declared public in openapi.yaml.
-_PUBLIC_PATHS = frozenset({"/healthz", "/login", "/logout",
+_PUBLIC_PATHS = frozenset({"/healthz", "/login", "/logout", "/setup",
                            "/api/openapi.json", "/api/openapi.yaml", "/api/docs"})
 
 # Methods that cannot change server state (exempt from the CSRF header check).
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
-# Session key holding the API key fingerprint.
-_SESSION_KEY = "akf"
+# Session key holding the credentials fingerprint.
+_SESSION_KEY = "cfp"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -56,23 +61,24 @@ def _current_api_key() -> str:
     return os.getenv("API_KEY", "").strip() or get_config().get("api_key", "")
 
 
-def _key_fingerprint(key: str) -> str:
-    """Non-reversible fingerprint of the API key stored in the session.
-
-    The key itself never goes into the cookie.  Keyed with the session
-    secret so the fingerprint is useless outside this instance.
-    """
+def _credentials_fingerprint() -> str:
     secret = get_config().get("session_secret", "").encode()
-    return hmac.new(secret, key.encode(), hashlib.sha256).hexdigest()
+    return hmac.new(secret, creds.credentials_version().encode(),
+                    hashlib.sha256).hexdigest()
 
 
-def _session_valid(api_key: str) -> bool:
+def session_valid() -> bool:
+    """True when the request carries a session for the current credentials."""
+    if not creds.credentials_source():
+        return False
     fp = session.get(_SESSION_KEY, "")
-    return bool(api_key and fp) and secrets.compare_digest(fp, _key_fingerprint(api_key))
+    return bool(fp) and secrets.compare_digest(fp, _credentials_fingerprint())
 
 
-def _basic_credentials() -> tuple[str, str]:
-    return os.getenv("APP_USERNAME", ""), os.getenv("APP_PASSWORD", "")
+def _start_session() -> None:
+    session.clear()
+    session.permanent = True
+    session[_SESSION_KEY] = _credentials_fingerprint()
 
 
 def _safe_next(target: str | None) -> str:
@@ -95,14 +101,9 @@ def _wants_html() -> bool:
     return request.accept_mimetypes.accept_html
 
 
-def _unauthorized(basic_enabled: bool):
-    if basic_enabled:
-        # Let the browser show its native Basic auth prompt.
-        return Response("Authentication required.", 401,
-                        {"WWW-Authenticate": 'Basic realm="pdf-dispatch"'})
-    if _wants_html():
-        return redirect(url_for("auth.login", next=request.full_path.rstrip("?")))
-    return jsonify({"ok": False, "error": "Authentication required."}), 401
+def _translations() -> tuple[str, dict]:
+    lang = get_config().get("language", DEFAULT_LANGUAGE)
+    return lang, TRANSLATIONS.get(lang, TRANSLATIONS.get(DEFAULT_LANGUAGE, {}))
 
 
 # ── Global hook ──────────────────────────────────────────────────────────────
@@ -123,58 +124,85 @@ def _require_auth():
         return jsonify({"ok": False, "error": "Invalid API key."}), 401
 
     # 2. Session cookie (web interface)
-    if _session_valid(api_key):
+    if session_valid():
         if request.method not in _SAFE_METHODS and not request.headers.get("X-Requested-With"):
             return jsonify({"ok": False,
                             "error": "Missing X-Requested-With header."}), 403
         return None
 
-    # 3. HTTP Basic auth
-    username, password = _basic_credentials()
-    basic_enabled = bool(username and password)
-    if basic_enabled:
-        auth = request.authorization
-        if (auth is not None
-                and secrets.compare_digest(auth.username or "", username)
-                and secrets.compare_digest(auth.password or "", password)):
+    # 3. HTTP Basic Authorization header (administrator account)
+    auth = request.authorization
+    if auth is not None and auth.type == "basic":
+        if creds.verify_credentials(auth.username or "", auth.password or ""):
             return None
-        return _unauthorized(basic_enabled=True)
+        return jsonify({"ok": False, "error": "Invalid credentials."}), 401
 
-    # 4. Nothing presented: reject when a key exists, else open mode
-    #    (documented "isolated network, no authentication" mode).
-    if api_key:
-        return _unauthorized(basic_enabled=False)
-    return None
+    # 4. Nothing valid presented.  Open mode only when no credential of any
+    #    kind exists (documented "isolated network" mode — unreachable in
+    #    practice since an API key is generated at startup).
+    if not api_key and not creds.credentials_source():
+        return None
+    if _wants_html():
+        if not creds.credentials_source():
+            return redirect(url_for("auth.setup"))
+        return redirect(url_for("auth.login", next=request.full_path.rstrip("?")))
+    return jsonify({"ok": False, "error": "Authentication required."}), 401
 
 
-# ── Login / logout ───────────────────────────────────────────────────────────
+# ── First-run setup ──────────────────────────────────────────────────────────
 
-def _render_login(error: bool = False, status: int = 200):
-    lang = get_config().get("language", DEFAULT_LANGUAGE)
-    tr = TRANSLATIONS.get(lang, TRANSLATIONS.get(DEFAULT_LANGUAGE, {}))
+def _render_setup(error_key: str | None = None, username: str = "admin", status: int = 200):
+    lang, tr = _translations()
+    return render_template("setup.html", lang=lang, tr=tr, error_key=error_key,
+                           username=username,
+                           min_len=creds.MIN_PASSWORD_LENGTH), status
+
+
+@bp.route("/setup", methods=["GET", "POST"])
+def setup():
+    """Create the administrator account (only while none exists)."""
+    if creds.credentials_source():
+        return redirect(url_for("auth.login"))
+    if request.method == "GET":
+        return _render_setup()
+
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    if password != request.form.get("password_confirm", ""):
+        return _render_setup("auth.error_password_mismatch", username, 400)
+    err = creds.complete_setup(request.form.get("setup_code", ""), username, password)
+    if err == "auth.error_setup_done":
+        return redirect(url_for("auth.login"))
+    if err:
+        return _render_setup(err, username, 401 if err == "auth.error_setup_code" else 400)
+    _start_session()
+    return redirect("/")
+
+
+# ── Sign-in / sign-out ───────────────────────────────────────────────────────
+
+def _render_login(error: bool = False, status: int = 200, username: str = ""):
+    lang, tr = _translations()
     return render_template(
-        "login.html", lang=lang, tr=tr, error=error,
+        "login.html", lang=lang, tr=tr, error=error, username=username,
         next=_safe_next(request.values.get("next")),
     ), status
 
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():
-    """Web-interface sign-in: exchanges the API key for a session cookie."""
-    api_key = _current_api_key()
-    if not api_key:
-        return redirect("/")          # open mode: nothing to sign in to
+    """Web-interface sign-in with the administrator account."""
+    if not creds.credentials_source():
+        return redirect(url_for("auth.setup"))
     if request.method == "GET":
-        if _session_valid(api_key):
+        if session_valid():
             return redirect(_safe_next(request.args.get("next")))
         return _render_login()
 
-    supplied = request.form.get("api_key", "").strip()
-    if not supplied or not secrets.compare_digest(supplied, api_key):
-        return _render_login(error=True, status=401)
-    session.clear()
-    session.permanent = True
-    session[_SESSION_KEY] = _key_fingerprint(api_key)
+    username = request.form.get("username", "").strip()
+    if not creds.verify_credentials(username, request.form.get("password", "")):
+        return _render_login(error=True, status=401, username=username)
+    _start_session()
     return redirect(_safe_next(request.form.get("next")))
 
 
@@ -183,3 +211,32 @@ def logout():
     """Clear the web-interface session and return to the sign-in page."""
     session.clear()
     return redirect(url_for("auth.login"))
+
+
+# ── Password change (signed-in administrator) ────────────────────────────────
+
+@bp.route("/api/settings/password", methods=["POST"])
+def api_change_password():
+    """POST /api/settings/password — change the administrator password.
+
+    Body: {"current_password": "...", "new_password": "..."}.
+    Refused when the credentials come from APP_USERNAME/APP_PASSWORD.
+    Other browsers are signed out; the calling session stays signed in.
+    """
+    if creds.credentials_source() != "stored":
+        return jsonify({"ok": False, "error_key": "auth.error_env_credentials",
+                        "error": "Credentials are set via APP_USERNAME/APP_PASSWORD."}), 400
+    data = request.get_json(silent=True) or {}
+    current = data.get("current_password", "")
+    new = data.get("new_password", "")
+    if not creds.verify_credentials(creds.admin_username(), current):
+        return jsonify({"ok": False, "error_key": "auth.error_current_password",
+                        "error": "Current password is incorrect."}), 400
+    err = creds.validate_new_credentials(creds.admin_username(), new)
+    if err:
+        return jsonify({"ok": False, "error_key": err,
+                        "error": "New password is too short."}), 400
+    creds.set_stored_credentials(creds.admin_username(), new)
+    if session.get(_SESSION_KEY):
+        _start_session()   # keep the caller signed in under the new fingerprint
+    return jsonify({"ok": True})

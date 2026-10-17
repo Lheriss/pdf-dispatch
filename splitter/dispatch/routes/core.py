@@ -32,12 +32,14 @@ def index():
     active language injected into window.I18N (client-side)."""
     lang = get_config().get("language", DEFAULT_LANGUAGE)
     i18n_json = json.dumps(TRANSLATIONS.get(lang, TRANSLATIONS.get(DEFAULT_LANGUAGE, {})), ensure_ascii=False)
-    # Sign-out only makes sense for the session sign-in (not for Basic auth,
-    # which browsers cache, nor for the unauthenticated open mode).
-    basic_enabled = bool(os.getenv("APP_USERNAME") and os.getenv("APP_PASSWORD"))
-    has_key = bool(os.getenv("API_KEY", "").strip() or get_config().get("api_key"))
+    # Sign-out and password change only make sense for a session sign-in
+    # (not when the page was opened with an API key or Basic header).
+    from dispatch.routes.auth import session_valid
+    from dispatch.credentials import credentials_source
+    signed_in = session_valid()
     return render_template("index.html", lang=lang, i18n_json=i18n_json,
-                           show_logout=has_key and not basic_enabled)
+                           show_logout=signed_in,
+                           can_change_password=signed_in and credentials_source() == "stored")
 
 
 
@@ -267,6 +269,7 @@ def _sanitize_config_for_client(cfg: dict) -> dict:
         ec.pop("password_enc", None)
         ec.pop("processed_ids", None)
     sanitized.pop("session_secret", None)
+    sanitized.pop("admin_password_hash", None)
     # Expose whether API_KEY is set via env var (key itself is already included)
     sanitized["_api_key_env_set"] = bool(os.getenv("API_KEY", "").strip())
     # If env var is set, show its value rather than the config value
@@ -351,10 +354,12 @@ def api_config_update():
     # ── Security: keys managed by dedicated endpoints cannot be set here ──
     # api_key: use /api/settings/regenerate-api-key (setting it to "" here
     # would silently switch the instance to unauthenticated mode).
-    # session_secret: internal, never exposed or settable.
+    # session_secret, admin_*: internal, managed by /setup and
+    # /api/settings/password, never settable here.
     _BLOCKED = frozenset({"email_configs", "stats", "counter",
                            "processed_ids", "processed_ids_oldest",
-                           "api_key", "session_secret"})
+                           "api_key", "session_secret",
+                           "admin_username", "admin_password_hash"})
     blocked = sorted(k for k in data if k in _BLOCKED)
     if blocked:
         return jsonify({
@@ -382,6 +387,7 @@ def api_config_update():
 
     cfg = dict(update_config(data))
     cfg.pop("session_secret", None)
+    cfg.pop("admin_password_hash", None)
     return jsonify({"ok": True, "config": cfg})
 
 

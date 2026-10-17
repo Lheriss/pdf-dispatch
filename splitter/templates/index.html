@@ -520,6 +520,19 @@
             <button class="btn secondary" style="font-size:12px" id="api-key-regen-btn" onclick="regenerateApiKey()" data-i18n="apikey.regenerate">Regenerate</button>
             <span id="api-key-status" style="font-size:12px;color:var(--muted)"></span>
           </div>
+          {% if can_change_password %}
+          <div class="pw-change">
+            <div class="pw-change-title" data-i18n="auth.pw_section_title">Administrator password</div>
+            <label for="pw-current" data-i18n="auth.pw_current">Current password</label>
+            <input id="pw-current" type="password" class="sinput" autocomplete="current-password">
+            <label for="pw-new" data-i18n="auth.pw_new">New password</label>
+            <input id="pw-new" type="password" class="sinput" autocomplete="new-password" minlength="8">
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn secondary" style="font-size:12px" onclick="changePassword()" data-i18n="auth.pw_change">Change password</button>
+              <span id="pw-status" role="status" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+          </div>
+          {% endif %}
         </div>
 
       </div>

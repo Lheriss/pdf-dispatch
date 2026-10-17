@@ -2,10 +2,11 @@
 {#
   pdf-dispatch — web-interface sign-in
   =====================================
-  Rendered by auth.login() (dispatch/routes/auth.py). The operator enters the
-  API key; on success the server sets a signed session cookie and redirects
-  to `next` (validated server-side to a local path). Server-side translated
-  via `tr` (the i18n dictionary for the active language) — no JavaScript.
+  Rendered by auth.login() (dispatch/routes/auth.py). The administrator signs
+  in with the account created on the /setup page (or APP_USERNAME /
+  APP_PASSWORD). On success the server sets a signed session cookie and
+  redirects to `next` (validated server-side to a local path).
+  Server-side translated via `tr` — no JavaScript.
 #}
 <html lang="{{ lang }}">
 <head>
@@ -23,16 +24,18 @@
 <main class="login-wrap">
   <form class="login-card" method="post" action="{{ url_for('auth.login') }}">
     <h2>{{ tr.get('auth.login_title', 'Sign in') }}</h2>
-    <p>{{ tr.get('auth.login_intro', 'Enter the API key to open the web interface.') }}</p>
     {% if error %}
-    <div class="login-error" role="alert">{{ tr.get('auth.error_invalid', 'Invalid API key.') }}</div>
+    <div class="login-error" role="alert">{{ tr.get('auth.error_invalid', 'Invalid username or password.') }}</div>
     {% endif %}
-    <label for="api_key">{{ tr.get('auth.key_label', 'API key') }}</label>
-    <input class="sinput" id="api_key" name="api_key" type="password"
-           autocomplete="current-password" autofocus required spellcheck="false">
+    <label for="username">{{ tr.get('auth.username', 'Username') }}</label>
+    <input class="sinput" id="username" name="username" type="text" value="{{ username }}"
+           autocomplete="username" autocapitalize="none" spellcheck="false" required {% if not username %}autofocus{% endif %}>
+    <label for="password">{{ tr.get('auth.password', 'Password') }}</label>
+    <input class="sinput" id="password" name="password" type="password"
+           autocomplete="current-password" required {% if username %}autofocus{% endif %}>
     <input type="hidden" name="next" value="{{ next }}">
     <button type="submit" class="btn">{{ tr.get('auth.submit', 'Sign in') }}</button>
-    <p class="login-hint">{{ tr.get('auth.key_where', '') }}</p>
+    <p class="login-hint">{{ tr.get('auth.forgot_hint', '') }}</p>
   </form>
 </main>
 </body>
