@@ -1101,8 +1101,10 @@ paths:
                   message: {type: string, example: "3 message(s) in INBOX"}
         "400":
           description: >
-            Destination refused by `SSRF_PROTECTION=block`: the host cannot be
-            resolved or resolves to a non-public address.
+            Destination refused by `SSRF_PROTECTION=block` (the host cannot be
+            resolved or resolves to a non-public address), or the stored
+            password of configuration `id` cannot be decrypted (EMAIL_SECRET
+            missing or different from the one it was saved with).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}

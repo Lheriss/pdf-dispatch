@@ -411,7 +411,7 @@ class TestImap:
         events = []
         monkeypatch.setattr(email_poller, "log_event",
                             lambda lvl, msg, *a, **k: events.append((lvl, str(msg))))
-        monkeypatch.setattr(email_poller, "decrypt_password", lambda enc: "pw")
+        monkeypatch.setattr(email_poller, "decrypt_password_checked", lambda enc: "pw")
         monkeypatch.setattr(email_poller, "_proc_ids_load", lambda cid: ([], None))
         email_poller._imap_process({
             "id": "t1", "name": "lab", "host": "imap.internal.example",

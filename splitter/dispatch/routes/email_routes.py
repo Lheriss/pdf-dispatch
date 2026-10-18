@@ -8,7 +8,9 @@ import uuid
 from flask import Blueprint, jsonify, request
 
 from dispatch.config import get_config, log, update_config
-from dispatch.crypto import decrypt_password, encrypt_password
+from dispatch.crypto import (
+    EmailSecretMissing, PasswordUnreadable, decrypt_password_checked, encrypt_password,
+)
 from dispatch.email_poller import (
     _email_config_signature, _email_find_duplicate,
     _email_find_name_conflict, _proc_ids_delete,
@@ -91,7 +93,10 @@ def api_email_configs_create():
         "polling_blocked":      False,
     }
     if data.get("password"):
-        new_ec["password_enc"] = encrypt_password(data["password"])
+        try:
+            new_ec["password_enc"] = encrypt_password(data["password"])
+        except EmailSecretMissing:
+            return jsonify({"ok": False, "error": t("email.error_no_email_secret")}), 400
 
     name_dup = _email_find_name_conflict(configs, new_ec["name"])
     if name_dup:
@@ -146,7 +151,10 @@ def api_email_configs_update(config_id):
     updated["poll_interval"]   = int(updated.get("poll_interval", 5) or 5)
 
     if data.get("password"):
-        updated["password_enc"] = encrypt_password(data["password"])
+        try:
+            updated["password_enc"] = encrypt_password(data["password"])
+        except EmailSecretMissing:
+            return jsonify({"ok": False, "error": t("email.error_no_email_secret")}), 400
 
     name_dup = _email_find_name_conflict(configs, updated["name"], exclude_id=config_id)
     if name_dup:
@@ -224,7 +232,12 @@ def api_email_test():
             stored = next((c for c in get_config().get("email_configs", [])
                             if c.get("id") == config_id), None)
             if stored:
-                password = decrypt_password(stored.get("password_enc", ""))
+                try:
+                    password = decrypt_password_checked(stored.get("password_enc", ""))
+                except PasswordUnreadable as exc:
+                    log_event("error", "📧 " + t("log.email_password_unreadable",
+                                                  name=name, reason=exc))
+                    return jsonify({"ok": False, "error": str(exc)}), 400
 
     log.info(f"IMAP test [{name}]: host={host} port={port} user={username} ssl={verify_ssl} folder={folder}")
 

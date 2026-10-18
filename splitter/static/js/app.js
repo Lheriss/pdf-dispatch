@@ -1544,7 +1544,8 @@ async function testEmailConnection() {
     const r = await fetch('/api/email/test', {method: 'POST',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
     const d = await r.json();
-    res.textContent = d.message;
+    // Success carries `message`; failures (502, SSRF, unreadable password) carry `error`.
+    res.textContent = d.message || d.error || ('HTTP ' + r.status);
     res.style.color = d.ok ? 'var(--accent)' : 'var(--error)';
   } catch(e) {
     res.textContent = t('common.error_label', {message: e.message});

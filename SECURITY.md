@@ -66,6 +66,7 @@ following items (all documented in the [README](README.md)):
       authentication (Authelia, Authentik, Nginx basic auth, …)
 - [ ] `EMAIL_SECRET` generated with `openssl rand -hex 32` and stored
       securely — never change it after setting up email accounts
+      (required for email polling: without it, IMAP passwords are refused)
 - [ ] `API_KEY` set if automated API access is required
 - [ ] HTTPS termination at the reverse proxy (HTTP Basic auth transmits
       credentials in base64 — plaintext equivalent without TLS)

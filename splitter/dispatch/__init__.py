@@ -101,6 +101,10 @@ def create_app() -> Flask:
     _ensure_api_key()
     # While no administrator account exists, log a one-time setup code.
     ensure_setup_token()
+    # Without EMAIL_SECRET, IMAP passwords can be neither stored nor read:
+    # say so once at startup (the key itself is never logged).
+    from dispatch.crypto import warn_if_email_secret_missing
+    warn_if_email_secret_missing()
 
     # ── Web-interface session cookie ──────────────────────────────────────
     # Signed with a persisted random secret (survives restarts, so users stay
