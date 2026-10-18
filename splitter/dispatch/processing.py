@@ -668,6 +668,56 @@ def find_split_pages(pdf_path: Path, trigger_map: list,
 
 
 # ---------------------------------------------------------------------------
+# Atomic output write
+# ---------------------------------------------------------------------------
+
+PARTIAL_SUFFIX = ".part"
+
+
+def _partial_path(out_path: Path) -> Path:
+    """Hidden temporary name next to *out_path* ('.' prefix, '.part' suffix):
+    not a *.pdf, so folder watchers (Paperless, scripts, the tester) ignore it."""
+    return out_path.with_name(f".{out_path.name}{PARTIAL_SUFFIX}")
+
+
+def write_pdf_atomic(writer: PdfWriter, out_path: Path) -> None:
+    """Write *writer* to *out_path* so the final file only ever appears complete.
+
+    The PDF is written and flushed to a hidden temporary file in the same
+    folder, then renamed into place (os.replace is atomic on one filesystem).
+    A program watching the output folder therefore never reads a half-written
+    document. On any error the temporary file is removed and nothing appears.
+    """
+    tmp = _partial_path(out_path)
+    try:
+        with open(tmp, "wb") as f:
+            writer.write(f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o664)
+        os.replace(tmp, out_path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def remove_stale_partials(root: Path) -> int:
+    """Delete temporary output files left by an interrupted write (e.g. the
+    container killed mid-write by the memory limit). Returns the count."""
+    removed = 0
+    for p in root.rglob(f".*.pdf{PARTIAL_SUFFIX}"):
+        try:
+            p.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+# ---------------------------------------------------------------------------
 # PDF metadata
 # ---------------------------------------------------------------------------
 
@@ -1184,9 +1234,7 @@ def process_file(pdf_path: Path):
 
             add_pdf_metadata(writer, trigger, out_path.name, now)
 
-            with open(out_path, "wb") as f:
-                writer.write(f)
-            os.chmod(out_path, 0o664)
+            write_pdf_atomic(writer, out_path)
             first_page = page_indices[0] + 1   # 1-indexed for log
             end_page   = page_indices[-1] + 1
             pages_str  = (f"page {first_page}"

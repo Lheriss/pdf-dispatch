@@ -855,6 +855,8 @@ npx @openapitools/openapi-generator-cli generate \
 | **CPU cap** | `cpus` — prevents barcode rasterisation from starving co-located services |
 | **Process count cap** | `pids_limit` — bounds thread creation regardless of load |
 
+> ℹ️ **Output files appear complete**: each document is written to a hidden temporary file (`.<name>.pdf.part`) in the target folder, then renamed into place in one step. A program watching the output folder — Paperless-ngx consume folder, a sync tool, a script — never sees a half-written PDF, and temporary files do not match `*.pdf`. Leftovers from an interrupted run are removed at the next start.
+
 > ⚠️ **OOM kill (exit code 137)**: if a PDF exceeds the memory ceiling during
 > rasterisation, Docker sends SIGKILL. The container restarts automatically
 > (`restart: unless-stopped`). The file is **not** moved to `/error/` — on
@@ -884,6 +886,7 @@ pdf-dispatch/
 │   ├── test_ssrf.py             ← outbound-connection guard: address policy, fail-closed DNS, rebinding, redirects, IMAP
 │   ├── test_hardening.py        ← EMAIL_SECRET fail-closed, hook environment and timeout, anonymous access refused on every route
 │   ├── test_health.py           ← /healthz: each check driven into its failing state (503)
+│   ├── test_atomic_output.py    ← outputs only appear complete (temporary file + rename)
 │   ├── test_python_core.py      ← unit tests for core Python functions (86 tests)
 │   ├── test_js_t_collision.py   ← detects t() key shadowing bugs in app.js
 │   ├── test_i18n_keys.py        ← verifies FR/EN key consistency
@@ -948,7 +951,7 @@ re-exports symbols for the test suite. The application logic lives in the
 | `netguard.py` | Outbound-connection guard (SSRF): address policy, fail-closed resolution, connection to the checked address only, no redirects; guarded `urlopen` and IMAP classes |
 | `webhook.py` | Payload builder, async HMAC-signed delivery with retries (through `netguard`) |
 | `health.py` | `/healthz` checks: watcher alive, input folder, `DATA_DIR` writable, free disk space, IMAP poller and retention threads when enabled |
-| `processing.py` | Full PDF pipeline: filename construction, folder routing, file stabilisation, two-pass barcode scan, blank-page detection, split/write, metadata, separator generation, `process_file` |
+| `processing.py` | Full PDF pipeline: filename construction, folder routing, file stabilisation, two-pass barcode scan, blank-page detection, split/atomic write, metadata, separator generation, `process_file` |
 | `retention.py` | Background retention thread: deletes files older than `RETENTION_DAYS_*` from `output/processed/` and `output/error/`, prunes emptied per-trigger subfolders; on-demand cycle for `/api/retention/run` |
 | `email_poller.py` | Background IMAP thread: polling, filters, attachment download, Message-ID deduplication, retention limits |
 | `watcher.py` | `watchdog.Observer` on `/data/input/`, processing thread pool, startup scan and banner |

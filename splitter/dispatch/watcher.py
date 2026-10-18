@@ -232,6 +232,16 @@ def start_watcher():
         log_event("info", f"Post-process hook: {POST_PROCESS_SCRIPT} [{hook_status}] (timeout: {POST_PROCESS_TIMEOUT}s)")
     log_event("info", "=" * 55)
 
+    # Remove temporary output files from a write interrupted by a crash
+    # (outputs are written to ".<name>.pdf.part" then renamed into place).
+    from dispatch.processing import remove_stale_partials
+    try:
+        _stale = remove_stale_partials(OUTPUT_DIR)
+        if _stale:
+            log_event("warning", f"Removed {_stale} incomplete output file(s) left by an interrupted run")
+    except OSError:
+        pass
+
     # Remove any stale .tmp from a counter write interrupted by a crash
     _ctr_tmp = _COUNTER_FILE.with_suffix(".tmp")
     if _ctr_tmp.exists():
