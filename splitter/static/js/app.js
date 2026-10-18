@@ -42,6 +42,37 @@
 // v1.15.1 release history for a real case).
 // =============================================================================
 
+// ── Authenticated fetch ───────────────────────────────────────────────────
+// Every call below goes through fetch(). This wrapper, installed once:
+//   - adds X-Requested-With to state-changing requests; the server requires it
+//     for requests authenticated by the session cookie (CSRF protection — a
+//     foreign site cannot set this header without a CORS preflight);
+//   - sends the browser back to the sign-in page when the session has expired
+//     or the API key was regenerated (HTTP 401 without a Basic challenge).
+(function installAuthFetch() {
+  const g = (typeof globalThis !== 'undefined') ? globalThis : window;
+  const origFetch = g.fetch;
+  if (typeof origFetch !== 'function') return;
+  g.fetch = function (input, init) {
+    const opts = Object.assign({}, init || {});
+    const method = (opts.method || 'GET').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+      if (typeof Headers !== 'undefined' && opts.headers instanceof Headers) {
+        opts.headers.set('X-Requested-With', 'pdf-dispatch');
+      } else {
+        opts.headers = Object.assign({}, opts.headers || {}, {'X-Requested-With': 'pdf-dispatch'});
+      }
+    }
+    return origFetch.call(g, input, opts).then(r => {
+      const basic = r && r.headers && typeof r.headers.get === 'function' && r.headers.get('WWW-Authenticate');
+      if (r && r.status === 401 && !basic && g.location && typeof g.location.assign === 'function') {
+        g.location.assign('/login?next=' + encodeURIComponent(g.location.pathname || '/'));
+      }
+      return r;
+    });
+  };
+})();
+
 // ── Local state ───────────────────────────────────────────────────────────
 let cfg = {};
 let dragSrc = null;
@@ -531,6 +562,30 @@ async function copyApiKey() {
     if (status) { status.textContent = t('apikey.copied'); status.style.color = 'var(--accent)'; }
     setTimeout(() => { if (status) { status.textContent = ''; } }, 2000);
   } catch(e) { console.error('Copy failed:', e); }
+}
+
+// Administrator password (only rendered for a session sign-in with stored
+// credentials — see index() in routes/core.py). Other browsers are signed out
+// server-side; this session stays signed in.
+async function changePassword() {
+  const cur = document.getElementById('pw-current');
+  const nw  = document.getElementById('pw-new');
+  const st  = document.getElementById('pw-status');
+  if (!cur || !nw || !st) return;
+  try {
+    const r = await fetch('/api/settings/password', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({current_password: cur.value, new_password: nw.value})});
+    const d = await r.json();
+    if (d.ok) {
+      cur.value = ''; nw.value = '';
+      st.textContent = t('auth.pw_changed'); st.style.color = 'var(--accent)';
+    } else {
+      st.textContent = t(d.error_key || 'auth.error_current_password'); st.style.color = 'var(--error)';
+    }
+  } catch (e) {
+    st.textContent = e.message; st.style.color = 'var(--error)';
+  }
 }
 
 async function regenerateApiKey() {

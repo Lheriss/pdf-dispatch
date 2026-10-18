@@ -6,7 +6,9 @@ Application Factory for pdf-dispatch.
 create_app() is the sole public entry point for building the Flask instance.
 It encapsulates app creation, request-size configuration, the 413 error
 handler, authentication logging, Blueprint registration, and the one-time
-API key generation that closes the anonymous-access window on first startup.
+API key generation that closes the anonymous-access window on first startup,
+the first-run setup code, and the signed session cookie used by the
+web-interface sign-in.
 
 Usage:
     from dispatch import create_app
@@ -14,6 +16,7 @@ Usage:
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from flask import Flask, jsonify
@@ -61,18 +64,12 @@ def create_app() -> Flask:
     app_username = os.getenv("APP_USERNAME", "")
     app_password = os.getenv("APP_PASSWORD", "")
     if app_username and app_password:
-        log.info("HTTP Basic authentication enabled "
-                 "(APP_USERNAME/APP_PASSWORD set).")
+        log.info("Web-interface administrator account taken from "
+                 "APP_USERNAME/APP_PASSWORD.")
     elif app_username or app_password:
         log.warning(
-            "APP_USERNAME and APP_PASSWORD must both be set to enable "
-            "authentication — no authentication is applied."
-        )
-    else:
-        log.info(
-            "No Basic authentication configured "
-            "(APP_USERNAME/APP_PASSWORD not set). "
-            "API key authentication is active (see Settings → API Key)."
+            "APP_USERNAME and APP_PASSWORD must both be set to be used as the "
+            "administrator account — ignoring them."
         )
 
     # ── Blueprints ────────────────────────────────────────────────────────
@@ -99,7 +96,24 @@ def create_app() -> Flask:
     # Must run after blueprints (so auth_bp.before_app_request is registered)
     # and before the server starts serving connections.
     # Idempotent: no-op when API_KEY env var is set or a key already exists.
-    from dispatch.config import _ensure_api_key
+    from dispatch.config import _ensure_api_key, _ensure_session_secret
+    from dispatch.credentials import ensure_setup_token
     _ensure_api_key()
+    # While no administrator account exists, log a one-time setup code.
+    ensure_setup_token()
+
+    # ── Web-interface session cookie ──────────────────────────────────────
+    # Signed with a persisted random secret (survives restarts, so users stay
+    # signed in).  HttpOnly + SameSite=Lax; Secure only when explicitly asked
+    # for, since most installs are served over plain HTTP on a LAN.
+    app.secret_key = _ensure_session_secret()
+    app.config.update(
+        SESSION_COOKIE_NAME="pdf_dispatch_session",
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes"),
+        PERMANENT_SESSION_LIFETIME=timedelta(
+            days=int(os.getenv("SESSION_LIFETIME_DAYS", "30"))),
+    )
 
     return app

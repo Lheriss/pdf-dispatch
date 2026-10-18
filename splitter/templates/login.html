@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+{#
+  pdf-dispatch — web-interface sign-in
+  =====================================
+  Rendered by auth.login() (dispatch/routes/auth.py). The administrator signs
+  in with the account created on the /setup page (or APP_USERNAME /
+  APP_PASSWORD). On success the server sets a signed session cookie and
+  redirects to `next` (validated server-side to a local path).
+  Server-side translated via `tr` — no JavaScript.
+#}
+<html lang="{{ lang }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pdf-dispatch — {{ tr.get('auth.login_title', 'Sign in') }}</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<header>
+  <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="11" width="7" height="2"/><rect x="10" y="5" width="2" height="14"/><rect x="14" y="5" width="8" height="2"/><rect x="14" y="11" width="8" height="2"/><rect x="14" y="17" width="8" height="2"/></svg></div>
+  <h1>{{ tr.get('app.title', 'PDF-DISPATCH') }}</h1>
+</header>
+<main class="login-wrap">
+  <form class="login-card" method="post" action="{{ url_for('auth.login') }}">
+    <h2>{{ tr.get('auth.login_title', 'Sign in') }}</h2>
+    {% if error %}
+    <div class="login-error" role="alert">{{ tr.get('auth.error_invalid', 'Invalid username or password.') }}</div>
+    {% endif %}
+    <label for="username">{{ tr.get('auth.username', 'Username') }}</label>
+    <input class="sinput" id="username" name="username" type="text" value="{{ username }}"
+           autocomplete="username" autocapitalize="none" spellcheck="false" required {% if not username %}autofocus{% endif %}>
+    <label for="password">{{ tr.get('auth.password', 'Password') }}</label>
+    <input class="sinput" id="password" name="password" type="password"
+           autocomplete="current-password" required {% if username %}autofocus{% endif %}>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" class="btn">{{ tr.get('auth.submit', 'Sign in') }}</button>
+    <p class="login-hint">{{ tr.get('auth.forgot_hint', '') }}</p>
+  </form>
+</main>
+</body>
+</html>

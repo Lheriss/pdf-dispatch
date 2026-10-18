@@ -29,6 +29,11 @@
   <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="11" width="7" height="2"/><rect x="10" y="5" width="2" height="14"/><rect x="14" y="5" width="8" height="2"/><rect x="14" y="11" width="8" height="2"/><rect x="14" y="17" width="8" height="2"/></svg></div>
   <h1 data-i18n="app.title">PDF-DISPATCH</h1>
   <div class="sdot" role="status" aria-live="polite"><div class="dot" id="sdot" aria-hidden="true"></div><span id="stext">actif</span></div>
+  {% if show_logout %}
+  <form method="post" action="/logout" class="logout-form">
+    <button type="submit" class="btn secondary" data-i18n="auth.logout">Sign out</button>
+  </form>
+  {% endif %}
 </header>
 
 <main>
@@ -515,6 +520,19 @@
             <button class="btn secondary" style="font-size:12px" id="api-key-regen-btn" onclick="regenerateApiKey()" data-i18n="apikey.regenerate">Regenerate</button>
             <span id="api-key-status" style="font-size:12px;color:var(--muted)"></span>
           </div>
+          {% if can_change_password %}
+          <div class="pw-change">
+            <div class="pw-change-title" data-i18n="auth.pw_section_title">Administrator password</div>
+            <label for="pw-current" data-i18n="auth.pw_current">Current password</label>
+            <input id="pw-current" type="password" class="sinput" autocomplete="current-password">
+            <label for="pw-new" data-i18n="auth.pw_new">New password</label>
+            <input id="pw-new" type="password" class="sinput" autocomplete="new-password" minlength="8">
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn secondary" style="font-size:12px" onclick="changePassword()" data-i18n="auth.pw_change">Change password</button>
+              <span id="pw-status" role="status" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+          </div>
+          {% endif %}
         </div>
 
       </div>

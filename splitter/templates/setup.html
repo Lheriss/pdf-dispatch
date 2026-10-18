@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+{#
+  pdf-dispatch — first-run setup
+  ===============================
+  Rendered by auth.setup() while no administrator account exists. The
+  one-time setup code printed in the container log proves the visitor has
+  access to the host (Jenkins-style), then the administrator account is
+  created. `error_key` is an i18n key; translated server-side via `tr`.
+#}
+<html lang="{{ lang }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pdf-dispatch — {{ tr.get('auth.setup_title', 'Initial setup') }}</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<header>
+  <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="11" width="7" height="2"/><rect x="10" y="5" width="2" height="14"/><rect x="14" y="5" width="8" height="2"/><rect x="14" y="11" width="8" height="2"/><rect x="14" y="17" width="8" height="2"/></svg></div>
+  <h1>{{ tr.get('app.title', 'PDF-DISPATCH') }}</h1>
+</header>
+<main class="login-wrap">
+  <form class="login-card" method="post" action="{{ url_for('auth.setup') }}">
+    <h2>{{ tr.get('auth.setup_title', 'Initial setup') }}</h2>
+    <p>{{ tr.get('auth.setup_intro', '') }}</p>
+    {% if error_key %}
+    <div class="login-error" role="alert">{{ tr.get(error_key, error_key) }}</div>
+    {% endif %}
+    <label for="setup_code">{{ tr.get('auth.setup_code', 'Setup code') }}</label>
+    <input class="sinput" id="setup_code" name="setup_code" type="text"
+           autocomplete="off" autocapitalize="none" spellcheck="false" required autofocus>
+    <p class="login-hint"><code>docker logs pdf-dispatch 2&gt;&amp;1 | grep "setup code"</code></p>
+    <label for="username">{{ tr.get('auth.username', 'Username') }}</label>
+    <input class="sinput" id="username" name="username" type="text" value="{{ username }}"
+           autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    <label for="password">{{ tr.get('auth.password', 'Password') }}</label>
+    <input class="sinput" id="password" name="password" type="password"
+           autocomplete="new-password" minlength="{{ min_len }}" required>
+    <label for="password_confirm">{{ tr.get('auth.password_confirm', 'Confirm password') }}</label>
+    <input class="sinput" id="password_confirm" name="password_confirm" type="password"
+           autocomplete="new-password" minlength="{{ min_len }}" required>
+    <button type="submit" class="btn">{{ tr.get('auth.setup_submit', 'Create account') }}</button>
+  </form>
+</main>
+</body>
+</html>

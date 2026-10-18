@@ -175,6 +175,13 @@ CONFIG_DEFAULTS = {
     "webhook_events":  "all",             # "all" | "success" | "error"
     # API key (auto-generated at startup; overridable via API_KEY env var)
     "api_key": "",
+    # Secret used to sign web-interface session cookies (auto-generated at
+    # startup, never sent to the browser, never settable via POST /api/config)
+    "session_secret": "",
+    # Web-interface administrator (created on the /setup page; overridden by
+    # APP_USERNAME/APP_PASSWORD). Only a scrypt hash of the password is kept.
+    "admin_username": "",
+    "admin_password_hash": "",
     # filename tokens: order = list, each token = dict
     # type: trigger | string | timestamp | counter
     # Tokens of type "string" may appear multiple times (unique id required)
@@ -396,6 +403,9 @@ def _validate_and_sanitize_config(cfg: dict) -> dict:
         cfg["webhook_events"] = "all"
     if not isinstance(cfg.get("api_key"), str):
         cfg["api_key"] = ""
+    for _k in ("session_secret", "admin_username", "admin_password_hash"):
+        if not isinstance(cfg.get(_k), str):
+            cfg[_k] = ""
 
     if cfg.get("separator_placement") not in ("before", "after"):
         if "separator_placement" in cfg:
@@ -589,8 +599,10 @@ def _ensure_api_key() -> None:
 
     The generated key is a 64-character hex string (secrets.token_hex(32)),
     identical in format to keys produced by /api/settings/regenerate-api-key.
-    It is persisted to .splitter_config.json and logged at INFO level so the
-    operator can retrieve it without accessing the web interface.
+    It is persisted to .splitter_config.json and shown in the web interface
+    (API access panel) once signed in.  It is a machine credential for
+    scripts and integrations; people sign in with the administrator account
+    (see dispatch/credentials.py), so the key is never written to the log.
     """
     if os.getenv("API_KEY", "").strip():
         # API_KEY env var is set — it is the authoritative key; nothing to do.
@@ -602,11 +614,26 @@ def _ensure_api_key() -> None:
     new_key = secrets.token_hex(32)
     update_config({"api_key": new_key})
     log.info(
-        "API key auto-generated at startup. "
-        "Retrieve it from the web interface under Settings \u2192 API Key, "
-        "or from %s.",
-        CONFIG_FILE,
+        "API key generated for scripts and integrations "
+        "(shown in the web interface under API access)."
     )
+
+
+def _ensure_session_secret() -> str:
+    """Return the secret used to sign session cookies, generating and
+    persisting it on first call.
+
+    Kept in the persistent config (not derived from the API key) so that
+    regenerating the API key does not change the signing secret; sessions
+    are instead invalidated by the key fingerprint they carry (see
+    routes/auth.py).
+    """
+    cfg = get_config()
+    secret = cfg.get("session_secret", "").strip()
+    if not secret:
+        secret = secrets.token_hex(32)
+        update_config({"session_secret": secret})
+    return secret
 
 
 _counter_lock  = threading.Lock()

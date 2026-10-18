@@ -38,14 +38,38 @@ import app as _app   # noqa: E402  (import après setup env)
 
 # ── Flask test client ─────────────────────────────────────────────────────────
 
+from flask.testing import FlaskClient  # noqa: E402
+from werkzeug.datastructures import Headers  # noqa: E402
+
+
+class _ApiKeyClient(FlaskClient):
+    """Test client that authenticates every request with the current API key.
+
+    The key is read from the live config on each request, so tests that
+    regenerate it (/api/settings/regenerate-api-key) keep working.  A test can
+    still send its own X-API-Key header (e.g. a wrong key) — it is not
+    overwritten.
+    """
+
+    def open(self, *args, **kwargs):
+        headers = Headers(kwargs.pop("headers", None) or {})
+        if "X-API-Key" not in headers:
+            headers["X-API-Key"] = _app.get_config().get("api_key", "")
+        kwargs["headers"] = headers
+        return super().open(*args, **kwargs)
+
+
 @pytest.fixture(scope="session")
 def client():
-    """Flask test client sans serveur réel.
+    """Flask test client sans serveur réel, authentifié par X-API-Key.
 
-    Auth désactivée (APP_USERNAME / APP_PASSWORD non définis).
-    Toutes les routes API sont accessibles sans credentials.
+    Basic auth désactivée (APP_USERNAME / APP_PASSWORD non définis) ; la clé
+    d'API générée au démarrage est envoyée automatiquement à chaque requête.
+    Les tests d'authentification eux-mêmes utilisent un client anonyme
+    (voir test_auth.py).
     """
     _app.app.config["TESTING"] = True
+    _app.app.test_client_class = _ApiKeyClient
     with _app.app.test_client() as c:
         yield c
 

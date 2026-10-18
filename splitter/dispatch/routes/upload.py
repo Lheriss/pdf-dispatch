@@ -154,15 +154,20 @@ def api_upload():
         fname = file.filename or ""
         # Security: sanitise filename
         fname = re.sub(r"[^\w\-. ]", "_", Path(fname).name)
-        # Prevent OS errors on excessively long names: truncate stem to 200 chars
-        _stem = Path(fname).stem[:200]
-        fname = _stem + ".pdf"
-        if not fname.lower().endswith(".pdf"):
-            errors.append(t("upload.error_not_pdf", filename=fname))
-            continue
         if not fname:
             errors.append(t("upload.error_empty_filename"))
             continue
+        # Check the extension on the submitted name, before it is rebuilt
+        # below (rebuilding first made this check always pass).
+        if not fname.lower().endswith(".pdf"):
+            errors.append(t("upload.error_not_pdf", filename=fname))
+            continue
+        # Prevent OS errors on excessively long names: truncate stem to 200 chars
+        _stem = Path(fname).stem[:200]
+        if not _stem:
+            errors.append(t("upload.error_empty_filename"))
+            continue
+        fname = _stem + ".pdf"
         dest = INPUT_DIR / fname
         # Avoid filename collisions
         counter = 1
