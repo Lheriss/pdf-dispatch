@@ -145,10 +145,13 @@ RETENTION_DAYS_PROCESSED = int(os.getenv("RETENTION_DAYS_PROCESSED", "0"))
 RETENTION_DAYS_ERROR     = int(os.getenv("RETENTION_DAYS_ERROR",     "0"))
 RETENTION_SCAN_INTERVAL  = int(os.getenv("RETENTION_SCAN_INTERVAL",  str(6 * 3600)))
 
-# SSRF protection — blocks webhook/email-test requests to private/loopback
-# addresses when set to "block" (#13).  Default "off": all URLs accepted.
-# Enable with SSRF_PROTECTION=block; document in README.
+# SSRF protection — with "block", outbound connections (webhooks, IMAP) are
+# restricted to public addresses (see dispatch/netguard.py).  Default "off".
 SSRF_PROTECTION = os.getenv("SSRF_PROTECTION", "off").strip().lower() == "block"
+# Exceptions to SSRF_PROTECTION=block: comma/space-separated IP addresses or
+# CIDR ranges, optionally with a port (192.168.1.10:8123, [fd00::5]:993).
+# Matched against the RESOLVED addresses, never against host names.
+SSRF_ALLOW = os.getenv("SSRF_ALLOW", "").strip()
 
 # Persistent configuration file (counter + UI preferences)
 # Stored at DATA_DIR root — protected from subfolder renames

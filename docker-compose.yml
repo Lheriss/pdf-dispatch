@@ -54,6 +54,9 @@ services:
       # (default) to send webhooks to a local Home Assistant or poll a LAN
       # mail server. Webhook redirects are never followed in either mode.
       # SSRF_PROTECTION: "block"
+      # Exceptions to "block": IP or CIDR, optional port, matched on resolved
+      # addresses (host names are not accepted). E.g. Home Assistant + LAN mail:
+      # SSRF_ALLOW: "192.168.1.10:8123, 192.168.1.20:993"
 
       # Encryption key for stored IMAP passwords — required for email polling
       # (without it, saving an IMAP password is refused).

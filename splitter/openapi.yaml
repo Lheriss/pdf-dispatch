@@ -1102,7 +1102,8 @@ paths:
         "400":
           description: >
             Destination refused by `SSRF_PROTECTION=block` (the host cannot be
-            resolved or resolves to a non-public address), or the stored
+            resolved or resolves to a non-public address not listed in
+            `SSRF_ALLOW`), or the stored
             password of configuration `id` cannot be decrypted (EMAIL_SECRET
             missing or different from the one it was saved with).
           content:
@@ -1191,7 +1192,7 @@ paths:
           description: >
             No webhook URL configured, or destination refused by
             `SSRF_PROTECTION=block` (host cannot be resolved or resolves to a
-            non-public address).
+            non-public address not listed in `SSRF_ALLOW`).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}

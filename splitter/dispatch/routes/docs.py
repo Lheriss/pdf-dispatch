@@ -14,7 +14,7 @@ from dispatch.config import (
     API_TASK_TIMEOUT, APP_VERSION, BARCODE_DPI_SCAN, DATA_DIR, DPI,
     FILE_STABLE_INTERVAL, FILE_STABLE_TIMEOUT, MAX_CONCURRENT_PROCESSING,
     MAX_LOG, MAX_PAGES, MAX_UPLOAD_MB, MAX_WORKER_THREADS,
-    SCANNER, SSRF_PROTECTION, UPSCALE,
+    SCANNER, SSRF_ALLOW, SSRF_PROTECTION, UPSCALE,
 )
 
 bp = Blueprint("docs", __name__)
@@ -130,6 +130,7 @@ def api_runtime():
         "file_stable_interval":     FILE_STABLE_INTERVAL,
         "api_task_timeout":         API_TASK_TIMEOUT,
         "ssrf_protection":          "block" if SSRF_PROTECTION else "off",
+        "ssrf_allow":               SSRF_ALLOW,
         "max_log_entries":          MAX_LOG,
         "data_dir":                 str(DATA_DIR),
     })

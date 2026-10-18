@@ -88,6 +88,20 @@ def _ssrf_safe(host: str, port: int = 0) -> bool:
     return check_destination(host, port)[0]
 
 
+def _url_host_port(url: str) -> tuple[str, int]:
+    """(host, effective port) of a webhook URL — the port is needed so that a
+    port-restricted SSRF_ALLOW entry (192.168.1.10:8123) can match."""
+    from urllib.parse import urlparse
+    parts = urlparse(url)
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if port is None:
+        port = 443 if parts.scheme == "https" else 80
+    return parts.hostname or "", port
+
+
 def _ssrf_blocked_response():
     """Standard JSON error response for SSRF-blocked requests.
     Returns a Flask-compatible (Response, 400) tuple.
@@ -98,7 +112,8 @@ def _ssrf_blocked_response():
             "SSRF protection active (SSRF_PROTECTION=block): "
             "the host cannot be resolved or resolves to a non-public address "
             "(private, loopback, link-local, CGNAT…). "
-            "Set SSRF_PROTECTION=off to allow connections to internal hosts."
+            "List the internal host in SSRF_ALLOW (IP or CIDR, optional port) "
+            "or set SSRF_PROTECTION=off."
         )
     }), 400
 
@@ -126,9 +141,7 @@ def _deliver_webhook(
         sig = _hmac.new(secret.encode("utf-8"), body, "sha256").hexdigest()
         headers["X-Signature"] = f"sha256={sig}"
 
-    from urllib.parse import urlparse as _urlparse
-    _host = _urlparse(url).hostname or ""
-    if not _ssrf_safe(_host):
+    if not _ssrf_safe(*_url_host_port(url)):
         log_event("warning",
                   f"Webhook SSRF blocked (SSRF_PROTECTION=block): {url}",
                   source_file)

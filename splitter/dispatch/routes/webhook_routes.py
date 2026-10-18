@@ -10,7 +10,7 @@ from dispatch.config import get_config
 from dispatch.netguard import SSRFBlocked, guarded_urlopen
 from dispatch.state import log_event
 from dispatch.webhook import (
-    _build_webhook_payload, _ssrf_blocked_response, _ssrf_safe,
+    _build_webhook_payload, _ssrf_blocked_response, _ssrf_safe, _url_host_port,
 )
 
 bp = Blueprint("webhook_routes", __name__)
@@ -32,9 +32,7 @@ def api_webhook_test():
     if not url:
         return jsonify({"ok": False, "error": "No webhook URL configured"}), 400
 
-    from urllib.parse import urlparse as _urlparse
-    _wh_host = _urlparse(url).hostname or ""
-    if not _ssrf_safe(_wh_host):
+    if not _ssrf_safe(*_url_host_port(url)):
         log_event("warning", f"Webhook test SSRF blocked (SSRF_PROTECTION=block): {url}")
         return _ssrf_blocked_response()
 

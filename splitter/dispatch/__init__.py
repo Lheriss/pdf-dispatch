@@ -105,6 +105,14 @@ def create_app() -> Flask:
     # say so once at startup (the key itself is never logged).
     from dispatch.crypto import warn_if_email_secret_missing
     warn_if_email_secret_missing()
+    # Invalid SSRF_ALLOW entries are ignored (never widened): report them.
+    from dispatch.config import log as _log
+    from dispatch.netguard import allowlist_problems
+    _bad_allow = allowlist_problems()
+    if _bad_allow:
+        _log.warning(
+            "SSRF_ALLOW: ignored invalid entries (use IP, CIDR or IP:port): %s",
+            ", ".join(_bad_allow))
 
     # ── Web-interface session cookie ──────────────────────────────────────
     # Signed with a persisted random secret (survives restarts, so users stay
