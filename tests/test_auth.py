@@ -344,3 +344,48 @@ class TestSecretsNotExposed:
     def test_not_in_config_response(self, admin, anon, field):
         r = anon.post("/api/config", json={"log_verbose": False}, headers={"X-API-Key": _key()})
         assert field not in r.json["config"]
+
+
+# ── Session cookie name: one per instance ────────────────────────────────────
+
+class TestCookieName:
+    """Browsers scope cookies by host, not by port: two instances on one host
+    (production :5880, test stack :5881) must not share a cookie name, or
+    signing in to one signs you out of the other."""
+
+    def test_name_unique_per_instance(self, monkeypatch):
+        from dispatch import session_cookie_name
+        monkeypatch.delenv("SESSION_COOKIE_NAME", raising=False)
+        a, b = session_cookie_name("a" * 64), session_cookie_name("b" * 64)
+        assert a.startswith("pdf_dispatch_session_") and b.startswith("pdf_dispatch_session_")
+        assert a != b
+        assert session_cookie_name("a" * 64) == a          # stable across restarts
+
+    def test_name_reveals_no_secret(self, monkeypatch):
+        from dispatch import session_cookie_name
+        monkeypatch.delenv("SESSION_COOKIE_NAME", raising=False)
+        secret = "0123456789abcdef" * 4
+        assert secret[:8] not in session_cookie_name(secret)
+
+    def test_override(self, monkeypatch):
+        from dispatch import session_cookie_name
+        monkeypatch.setenv("SESSION_COOKIE_NAME", "pdfd_prod")
+        assert session_cookie_name("x") == "pdfd_prod"
+
+    def test_invalid_override_ignored(self, monkeypatch):
+        from dispatch import session_cookie_name
+        monkeypatch.setenv("SESSION_COOKIE_NAME", "bad name;Path=/")
+        assert session_cookie_name("x").startswith("pdf_dispatch_session_")
+
+    def test_app_uses_instance_name(self, admin, anon):
+        from dispatch import session_cookie_name
+        name = _app.app.config["SESSION_COOKIE_NAME"]
+        assert name == session_cookie_name(_app.app.secret_key)
+        r = anon.post("/login", data={"username": USER, "password": PWD})
+        assert r.headers["Set-Cookie"].startswith(name + "=")
+
+    def test_old_generic_cookie_ignored(self, admin):
+        # A leftover cookie under the pre-1.8.3 name grants nothing.
+        c = FlaskClient(_app.app, _app.app.response_class, use_cookies=True)
+        c.set_cookie("pdf_dispatch_session", "anything")
+        assert c.get("/api/state").status_code == 401
