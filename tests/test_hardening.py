@@ -171,7 +171,9 @@ def _alive(pid: int) -> bool:
     try:
         with open(f"/proc/{pid}/stat") as f:
             return f.read().split(")")[-1].split()[0] != "Z"   # zombie = dead
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        # ProcessLookupError (ESRCH): the process vanished between open() and
+        # read() — it is dead. (Intermittent CI failure on 2026-10-18.)
         return False
 
 
