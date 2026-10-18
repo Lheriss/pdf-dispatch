@@ -58,6 +58,9 @@ services:
       # addresses (host names are not accepted). E.g. Home Assistant + LAN mail:
       # SSRF_ALLOW: "192.168.1.10:8123, 192.168.1.20:993"
 
+      # /healthz reports "disk" failed (HTTP 503) below this free space (MB).
+      # HEALTHZ_MIN_FREE_MB: "100"
+
       # Encryption key for stored IMAP passwords — required for email polling
       # (without it, saving an IMAP password is refused).
       # ⚠️ Set this once and never change it.

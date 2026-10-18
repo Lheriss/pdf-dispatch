@@ -71,8 +71,8 @@
       "sessionCookie": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "pdf_dispatch_session",
-        "description": "Signed session cookie set when the administrator signs in on `/login`. Write requests using it must also send `X-Requested-With`.\n"
+        "name": "pdf_dispatch_session_<id>",
+        "description": "Signed session cookie set when the administrator signs in on `/login`. Its name ends with a short identifier unique to the instance (or is set by `SESSION_COOKIE_NAME`). Write requests using it must also send `X-Requested-With`.\n"
       },
       "basicAuth": {
         "type": "http",
@@ -81,6 +81,40 @@
       }
     },
     "schemas": {
+      "Health": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "ok",
+                "failed",
+                "disabled",
+                "n/a"
+              ]
+            },
+            "example": {
+              "watcher": "ok",
+              "input_dir": "ok",
+              "data_dir": "ok",
+              "disk": "ok",
+              "email_poller": "disabled",
+              "retention": "disabled"
+            }
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "OkTrue": {
         "type": "object",
         "required": [
@@ -326,7 +360,7 @@
     "/healthz": {
       "get": {
         "summary": "Health check",
-        "description": "Always returns `{\"ok\": true}`. Not protected by authentication. Used by Docker HEALTHCHECK.\n",
+        "description": "Runs the internal health checks (watcher, input folder, DATA_DIR writable, free disk space, IMAP poller and retention thread when enabled). Not protected by authentication; used by the Docker HEALTHCHECK and external monitors. Only check names and statuses are returned (`ok`, `failed`, `disabled`, `n/a`).\n",
         "operationId": "healthz",
         "tags": [
           "system"
@@ -334,11 +368,21 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Service is running.",
+            "description": "Every check passes.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OkTrue"
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "At least one check failed (listed in `failed`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
                 }
               }
             }

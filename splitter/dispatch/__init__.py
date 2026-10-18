@@ -15,7 +15,9 @@ Usage:
     app = create_app()
 """
 
+import hashlib
 import os
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -120,7 +122,7 @@ def create_app() -> Flask:
     # for, since most installs are served over plain HTTP on a LAN.
     app.secret_key = _ensure_session_secret()
     app.config.update(
-        SESSION_COOKIE_NAME="pdf_dispatch_session",
+        SESSION_COOKIE_NAME=session_cookie_name(app.secret_key),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes"),
@@ -129,3 +131,29 @@ def create_app() -> Flask:
     )
 
     return app
+
+
+_COOKIE_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def session_cookie_name(secret: str) -> str:
+    """Name of the session cookie, unique per instance.
+
+    Browsers scope cookies by host, NOT by port: two instances on the same
+    host (e.g. production on :5880 and a test stack on :5881) sharing one
+    cookie name overwrite each other's cookie, so signing in to one signs
+    you out of the other. The name therefore carries a short tag derived
+    from the instance's own (persisted) session secret — stable across
+    restarts, different for every instance. SESSION_COOKIE_NAME overrides it.
+
+    The tag is a domain-separated hash: it reveals nothing usable about the
+    secret.
+    """
+    override = os.getenv("SESSION_COOKIE_NAME", "").strip()
+    if override:
+        if _COOKIE_NAME_RE.fullmatch(override):
+            return override
+        from dispatch.config import log as _log
+        _log.warning("SESSION_COOKIE_NAME ignored: use 1-64 letters, digits, '_' or '-'")
+    tag = hashlib.sha256(b"pdf-dispatch session cookie name\0" + secret.encode("utf-8")).hexdigest()[:8]
+    return f"pdf_dispatch_session_{tag}"
