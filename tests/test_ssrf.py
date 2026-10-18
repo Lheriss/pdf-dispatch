@@ -347,8 +347,27 @@ class _FakeImapServer:
         except OSError:
             return
         self.accepted += 1
+        conn.settimeout(5)
         conn.sendall(b"* OK [CAPABILITY IMAP4rev1] ready\r\n")
-        conn.close()
+        # Some Python versions (3.12) ignore the greeting's response code and
+        # send CAPABILITY anyway; answer it, then any other command until EOF.
+        try:
+            buf = b""
+            while True:
+                chunk = conn.recv(1024)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\r\n" in buf:
+                    line, buf = buf.split(b"\r\n", 1)
+                    tag, _, cmd = line.partition(b" ")
+                    if cmd.upper().startswith(b"CAPABILITY"):
+                        conn.sendall(b"* CAPABILITY IMAP4rev1\r\n")
+                    conn.sendall(tag + b" OK done\r\n")
+        except OSError:
+            pass
+        finally:
+            conn.close()
 
     def close(self):
         self.sock.close()
