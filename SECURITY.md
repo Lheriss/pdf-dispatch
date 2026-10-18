@@ -62,17 +62,22 @@ credited in the release notes unless you prefer to remain anonymous.
 Before exposing pdf-dispatch to any network beyond localhost, review the
 following items (all documented in the [README](README.md)):
 
-- [ ] `APP_USERNAME` and `APP_PASSWORD` set, or a reverse proxy handling
-      authentication (Authelia, Authentik, Nginx basic auth, …)
+- [ ] First-run setup completed: administrator account created with a
+      strong password (the one-time setup code is printed in the container
+      log until then — restrict access to the logs), or `APP_USERNAME` /
+      `APP_PASSWORD` set
 - [ ] `EMAIL_SECRET` generated with `openssl rand -hex 32` and stored
       securely — never change it after setting up email accounts
       (required for email polling: without it, IMAP passwords are refused)
-- [ ] `API_KEY` set if automated API access is required
-- [ ] HTTPS termination at the reverse proxy (HTTP Basic auth transmits
-      credentials in base64 — plaintext equivalent without TLS)
+- [ ] API key kept secret — it is auto-generated; regenerate it from the
+      *API access* panel if it leaks (or manage it yourself with `API_KEY`)
+- [ ] HTTPS termination at the reverse proxy if exposed beyond a trusted
+      network (the sign-in form, session cookie and API key travel in clear
+      otherwise), with `SESSION_COOKIE_SECURE=true`
 - [ ] `MEM_LIMIT` and `MAX_PAGES` set conservatively for untrusted input
 - [ ] `SSRF_PROTECTION=block`, with the local services webhooks or IMAP must
       reach listed in `SSRF_ALLOW` (see the README, *Outbound connections*)
 - [ ] Docker container not running as root (verified by default via
       `gosu` in `entrypoint.sh`)
 - [ ] Container not on a `--network host` bridge with sensitive services
+- [ ] `/healthz` monitored (it answers 503 when an internal check fails)

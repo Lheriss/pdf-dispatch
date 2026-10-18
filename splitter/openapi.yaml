@@ -298,6 +298,45 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/Health"}
 
+  /api/runtime:
+    get:
+      summary: Effective runtime configuration
+      description: >
+        Values actually used by the application after applying environment
+        variables and defaults (diagnostics, test-suite session header).
+        Contains no secret.
+      operationId: getRuntime
+      tags: [system]
+      responses:
+        "200":
+          description: Runtime values.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  app_version:               {type: string, example: "v1.8.3"}
+                  barcode_dpi:               {type: integer}
+                  barcode_dpi_scan:          {type: integer}
+                  barcode_scanner:           {type: string, enum: [ZXING, PYZBAR]}
+                  barcode_upscale:           {type: number}
+                  max_pages:                 {type: integer}
+                  max_upload_mb:             {type: integer}
+                  max_concurrent_processing: {type: integer}
+                  max_worker_threads:        {type: integer}
+                  file_stable_timeout:       {type: integer}
+                  file_stable_interval:      {type: integer}
+                  api_task_timeout:          {type: integer}
+                  ssrf_protection:           {type: string, enum: [block, "off"]}
+                  ssrf_allow:                {type: string, description: Raw SSRF_ALLOW value (empty when unset).}
+                  max_log_entries:           {type: integer}
+                  data_dir:                  {type: string}
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
   # ── Config & state ─────────────────────────────────────────────────────────
 
   /api/state:

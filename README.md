@@ -325,12 +325,16 @@ On first startup, pdf-dispatch creates all required subfolders inside `/data`:
 | `BARCODE_UPSCALE` | `1.0` | Upscale factor applied before detection |
 | `BLANK_PAGE_SPLIT` | `false` | Enable blank-sheet separators (see [Blank-page separators](#blank-page-separators)). Off by default. |
 | `BLANK_PAGE_THRESHOLD` | `0.005` | Ink ratio below which a page is treated as blank. Lower = stricter (only near-empty pages); higher = more lenient. Calibrate with the Detection test panel. |
+| `BLANK_PAGE_OFFSET` | `50` | How much darker than the page's own average brightness (0–255 scale) a pixel must be to count as ink. Raise it if paper texture or show-through makes blank sheets look inked; lower it for very faint content. |
+| `BLANK_PAGE_LR_MARGIN` | `0.10` | Fraction of the page width cropped from the left **and** right edges before measuring ink (ignores scanner edge streaks, punch holes). |
+| `BLANK_PAGE_TB_MARGIN` | `0.05` | Fraction of the page height cropped from the top **and** bottom edges before measuring ink. |
 | `FILE_STABLE_TIMEOUT` | `60` | Max seconds to wait for a file to stop changing before processing. Files that exceed this timeout (zero bytes, or still growing) are moved to `/data/output/error/`. |
 | `FILE_STABLE_INTERVAL` | `2` | Seconds between two file-size checks during stabilisation |
 | `MAX_LOG_ENTRIES` | `200` | Maximum number of entries kept in the activity log |
 | `HEALTHZ_MIN_FREE_MB` | `100` | Free space in `DATA_DIR` (MB) below which `/healthz` reports the `disk` check as failed (HTTP 503) |
 | `MAX_UPLOAD_MB` | `50` | Maximum file size accepted by `/api/upload` and the web drag-and-drop. Files exceeding this limit are rejected immediately (HTTP 400 with a clear error message) — no bytes are written to disk. Reduce if memory is constrained. |
 | `MAX_PAGES` | `100` | Maximum number of pages a PDF may contain. Checked after upload using pypdf (no rendering — cheap) and before the watchdog starts barcode scanning. PDFs over the limit are deleted and an error is returned to the caller. At `BARCODE_DPI=300`, each A4 page requires ~26 MB of RAM during scanning; a 200-page PDF would need ~5 GB and crash the container. |
+| `DETECT_MAX_PAGES` | `10` | Maximum number of pages analysed by the **Detection test** panel / `POST /api/detect` (also capped by `MAX_PAGES`). Detection rasterises every page at full DPI, so keep it small. |
 | `MAX_CONCURRENT_PROCESSING` | `2` | Maximum number of PDFs processed simultaneously. All three processing modes (watchdog/file-drop, API upload, email attachment) funnel through the same `process_file` function; this setting limits how many run concurrently regardless of source. At `BARCODE_DPI=300` each concurrent render occupies ~26 MB per page; more than 2–3 simultaneous renders can saturate the NAS CPU/RAM and make the Flask API unresponsive (GET `/api/tasks` latency spikes from 2 ms to tens of seconds). Increase only if your hardware has spare capacity. |
 | `MAX_WORKER_THREADS` | `max(8, MAX_CONCURRENT_PROCESSING + 4)` | Size of the internal thread pool shared between the file-drop watchdog and `scan_existing`. Each incoming file consumes one worker slot while waiting for stabilisation; the rendering concurrency is further limited by `MAX_CONCURRENT_PROCESSING`. Reducing this value limits memory pressure on very constrained hardware (each thread has ~8 MB of virtual stack); increasing it allows more files to be queued in parallel before hitting the pool limit. Default is at least 8 to handle normal spikes at startup. |
 | `API_TASK_TIMEOUT` | `120` | Hard deadline in seconds for processing a single PDF. Checked immediately before and after `find_split_pages` (the DPI-render step). If the deadline is exceeded the file is moved to `/data/output/error/` and the task is marked `error`. Cannot interrupt an ongoing page render (Python threads cannot be killed), but prevents post-processing of a result that arrived after the deadline and releases the concurrency slot. |
@@ -501,13 +505,17 @@ Shows recent events: file processing, configuration changes, email polling, erro
 |-----------|-----------|
 | PDF with no trigger code | Copied to `/data/output/no_code/` |
 | Corrupted or unreadable PDF | Moved to `/data/output/error/` |
-| Non-PDF file | Moved to `/data/output/error/` |
+| Non-PDF file dropped in the input folder | Moved to `/data/output/error/` |
+| Upload (API or drag-and-drop) of a file not named `*.pdf` | Rejected at upload: listed in the response `errors[]`, nothing is written |
 | Files present at startup | Processed automatically |
 | File that never stabilises (zero bytes or still growing after `FILE_STABLE_TIMEOUT` s) | Moved to `/data/output/error/` with a stabilisation timeout reason |
 | Separator page only + delete enabled | Discarded, warning logged |
 | Multiple triggers on one page | One output document per trigger. Identical duplicate codes are deduplicated (one document per distinct code) |
 | Upload exceeds `MAX_UPLOAD_MB` | Rejected with HTTP 400 before writing to disk. The `errors[]` array in the response contains the filename and the limit. |
 | PDF exceeds `MAX_PAGES` | Accepted by the upload endpoint, then immediately deleted. A task is created with `status: error` and a descriptive message. The watchdog never processes it. |
+| Container stopped while writing an output (e.g. OOM kill) | No partial PDF appears (outputs are written to a hidden `.part` file, then renamed); the leftover temporary file is removed at the next start |
+| Webhook endpoint answers with a redirect (3xx) | Not followed; logged as a failed attempt naming the redirect target (configure the final URL) |
+| Stored IMAP password cannot be decrypted (`EMAIL_SECRET` changed or missing) | Polling of that account is skipped with an explicit error in the activity log; restore the original key or enter the password again |
 | Output subdirectory not writable (owner mismatch after PUID/PGID change) | Automatically removed and recreated if **empty**. If non-empty, a warning is logged with the `chown` command to run manually. |
 
 ---
@@ -523,6 +531,11 @@ After every processed file, pdf-dispatch can POST a JSON payload to any URL. Con
 | Events | `All (success + errors)` / `Success only` / `Errors only` |
 | HMAC-SHA256 secret | Optional. When set, every request includes `X-Signature: sha256=<hmac>` |
 | Test | Sends a synchronous test payload and shows the response code |
+
+Destination rules (see [Security](#security)):
+
+- **Redirects are never followed.** A 3xx answer counts as a failure and names the redirect target — configure the final URL.
+- With `SSRF_PROTECTION=block`, the URL must resolve to public addresses only, unless the address is listed in `SSRF_ALLOW` (e.g. `192.168.1.10:8123` for a local Home Assistant). A refused destination is reported by the Test button (HTTP 400) and in the activity log; deliveries are not retried.
 
 ### Payload
 
@@ -662,7 +675,7 @@ pdf-dispatch exposes a REST API covering all operations available from the web i
 
 ### Authentication
 
-Every endpoint requires authentication except `/healthz` and the API description (`/api/openapi.json`, `/api/openapi.yaml`, `/api/docs`). Accepted credentials, checked in order:
+Every endpoint requires authentication except `/healthz`, the sign-in pages (`/login`, `/logout`, `/setup`) and the API description (`/api/openapi.json`, `/api/openapi.yaml`, `/api/docs`). Accepted credentials, checked in order:
 
 1. **API key** (recommended for scripts and integrations): `X-API-Key: <key>` header.
    The key is auto-generated at first startup and shown in the **API access** panel. Override with the `API_KEY` environment variable.
@@ -819,7 +832,7 @@ npx @openapitools/openapi-generator-cli generate \
 - **First-run setup** (same approach as Jenkins): until the administrator account exists, a one-time setup code is printed in the container log and required by the setup page, so nobody else on the network can claim a fresh instance. The code is kept in memory only and is regenerated at each start until setup is completed.
 - **Administrator password** is stored as a salted **scrypt** hash (`werkzeug.security`), never in clear; minimum 8 characters. It can be changed from the interface (current password required), which signs every other browser out. `APP_USERNAME` / `APP_PASSWORD`, when set, take precedence and are never written to disk.
 - **API key** is auto-generated at first startup if none is configured (stored in `.splitter_config.json`, never written to the log). Override with the `API_KEY` env var to supply it outside the config file.
-- **No anonymous access**: every route except `/healthz`, `/login`, `/setup` and the API description requires the API key, a web-interface session, or the administrator account in a Basic header.
+- **No anonymous access**: every route except `/healthz`, `/login`, `/logout`, `/setup` and the API description requires the API key, a web-interface session, or the administrator account in a Basic header.
 - **Session cookie**: signed, `HttpOnly`, `SameSite=Lax`, `Secure` with `SESSION_COOKIE_SECURE=true`. Its name is unique per instance (`pdf_dispatch_session_<id>`), so two instances on the same host — browsers ignore the port for cookies — do not sign each other out. It holds a keyed fingerprint of the current credentials — never the password — so changing the password ends every session. The signing secret is generated at first start, persisted, and never exposed by the API.
 - **CSRF protection**: write requests authenticated by the session cookie must carry an `X-Requested-With` header (added by the interface), which a foreign site cannot send without a CORS preflight; otherwise they are rejected with HTTP 403. Sign-in redirects only to local paths (no open redirect).
 - **Protected settings**: `api_key`, the administrator account and the session secret cannot be read or changed through `POST /api/config` / `GET /api/state` — only through their dedicated endpoints (`/setup`, `/api/settings/password`, `/api/settings/regenerate-api-key`).
