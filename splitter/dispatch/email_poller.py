@@ -25,7 +25,6 @@ Internal dependencies:
 
 import email as _email_mod
 import hashlib
-import imaplib
 import json
 import os
 import re
@@ -39,6 +38,7 @@ from dispatch.config import (
     DATA_DIR, INPUT_DIR, MAX_UPLOAD_MB, get_config, log, update_config,
 )
 from dispatch.crypto import decrypt_password
+from dispatch.netguard import GuardedIMAP4, GuardedIMAP4_SSL, SSRFBlocked
 from dispatch.i18n import t
 from dispatch.state import (
     _email_triggers, _email_triggers_lock,
@@ -339,14 +339,19 @@ def _imap_process(email_cfg: dict):
 
     # Use the username as-is — some servers expect user@domain, others just user
     login_user = username
+    # Guarded IMAP classes apply the SSRF policy (dispatch/netguard.py) to
+    # the real polling connection, not only to the connection test.
     try:
         if use_ssl:
-            M = imaplib.IMAP4_SSL(host, port, ssl_context=ctx, timeout=15)
+            M = GuardedIMAP4_SSL(host, port, ssl_context=ctx, timeout=15)
         else:
-            M = imaplib.IMAP4(host, port)
+            M = GuardedIMAP4(host, port)
             try: M.socket().settimeout(15)
             except Exception: pass
         M.login(login_user, password)
+    except SSRFBlocked as e:
+        log_event("error", f"📧 [{name}] IMAP SSRF blocked (SSRF_PROTECTION=block): {e}")
+        return
     except Exception as e:
         log_event("error", t("log.email_connection_failed", name=name, message=e))
         return

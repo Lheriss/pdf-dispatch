@@ -47,6 +47,14 @@ services:
       # Once the config file exists the saved value takes precedence.
       # APP_LANGUAGE: "${APP_LANGUAGE:-fr}"
 
+      # Outbound-connection guard (optional). "block" restricts webhooks and
+      # IMAP (test and polling) to public addresses: fail-closed DNS, private,
+      # loopback, link-local and CGNAT (100.64.0.0/10) ranges refused, DNS
+      # rebinding resistant, HTTP(S)_PROXY ignored for webhooks. Keep "off"
+      # (default) to send webhooks to a local Home Assistant or poll a LAN
+      # mail server. Webhook redirects are never followed in either mode.
+      # SSRF_PROTECTION: "block"
+
       # Encryption key for stored IMAP passwords.
       # ⚠️ Set this once and never change it.
       # Generate with: openssl rand -hex 32

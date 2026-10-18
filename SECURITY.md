@@ -23,7 +23,7 @@ In-scope vulnerabilities include:
 - Authentication bypass on the web interface or API
 - Remote code execution via crafted PDF or configuration input
 - Path traversal allowing access to files outside `/data`
-- SSRF via the webhook URL field
+- SSRF via the webhook URL or the IMAP server fields
 - Privilege escalation inside the Docker container
 
 Out-of-scope:
@@ -70,7 +70,8 @@ following items (all documented in the [README](README.md)):
 - [ ] HTTPS termination at the reverse proxy (HTTP Basic auth transmits
       credentials in base64 — plaintext equivalent without TLS)
 - [ ] `MEM_LIMIT` and `MAX_PAGES` set conservatively for untrusted input
-- [ ] `SSRF_PROTECTION=block` if the webhook feature is enabled
+- [ ] `SSRF_PROTECTION=block` unless webhooks or IMAP must reach hosts on
+      your own network (see the README, *Outbound connections*)
 - [ ] Docker container not running as root (verified by default via
       `gosu` in `entrypoint.sh`)
 - [ ] Container not on a `--network host` bridge with sensitive services

@@ -6,7 +6,8 @@ import json
 
 from flask import Blueprint, jsonify, request
 
-from dispatch.config import get_config, SSRF_PROTECTION
+from dispatch.config import get_config
+from dispatch.netguard import SSRFBlocked, guarded_urlopen
 from dispatch.state import log_event
 from dispatch.webhook import (
     _build_webhook_payload, _ssrf_blocked_response, _ssrf_safe,
@@ -55,12 +56,20 @@ def api_webhook_test():
 
     try:
         request = _req.Request(url, data=body, headers=headers, method="POST")
-        with _req.urlopen(request, timeout=10) as resp:
+        with guarded_urlopen(request, timeout=10) as resp:
             code = resp.status
         log_event("info", f"Webhook test: HTTP {code} → {url}")
         return jsonify({"ok": 200 <= code < 300, "code": code})
     except _err.HTTPError as exc:
-        return jsonify({"ok": False, "error": f"HTTP {exc.code}", "code": exc.code})
+        error = f"HTTP {exc.code}"
+        if 300 <= exc.code < 400:
+            error += f" — redirect to {exc.headers.get('Location', '?')} not followed"
+        return jsonify({"ok": False, "error": error, "code": exc.code})
+    except _err.URLError as exc:
+        if isinstance(getattr(exc, "reason", None), SSRFBlocked):
+            log_event("warning", f"Webhook test SSRF blocked (SSRF_PROTECTION=block): {exc.reason}")
+            return _ssrf_blocked_response()
+        return jsonify({"ok": False, "error": str(exc)})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)})
 

@@ -12,7 +12,8 @@ Contains:
   - _fire_webhook()          — entry point: filters and dispatches delivery
 
 Internal dependencies:
-  - dispatch.config  (SSRF_PROTECTION, get_config, DATA_DIR, log)
+  - dispatch.config  (get_config, DATA_DIR, log)
+  - dispatch.netguard (SSRF policy: check_destination, guarded_urlopen)
   - dispatch.state   (log_event)
   - dispatch.i18n    (t — translated log messages)
   - flask.jsonify    (_ssrf_blocked_response returns a Flask response)
@@ -26,8 +27,9 @@ from pathlib import Path
 
 from flask import jsonify
 
-from dispatch.config import DATA_DIR, SSRF_PROTECTION, get_config, log
+from dispatch.config import DATA_DIR, get_config, log
 from dispatch.i18n import t
+from dispatch.netguard import SSRFBlocked, check_destination, guarded_urlopen
 from dispatch.state import log_event
 
 
@@ -75,31 +77,15 @@ def _build_webhook_payload(
     return payload
 
 
-def _ssrf_safe(host: str) -> bool:
-    """Return True if *host* is safe to connect to.
+def _ssrf_safe(host: str, port: int = 0) -> bool:
+    """Return True if *host* may be contacted under the SSRF policy.
 
-    Always True when SSRF_PROTECTION is "off" (default).  When "block", resolves
-    *host* and rejects private/loopback/link-local addresses.  Fail-open: if
-    resolution fails, the request is allowed (it will fail at connect time).
+    Always True when SSRF_PROTECTION is "off" (default). When "block",
+    every address the host resolves to must be public; resolution failure is
+    a refusal (fail-closed). See dispatch/netguard.py — this early check only
+    gives a clear error; the binding check is repeated at connect time.
     """
-    if not SSRF_PROTECTION:
-        return True
-    import ipaddress
-    import socket as _sock
-    _PRIVATE = [
-        ipaddress.ip_network("10.0.0.0/8"),
-        ipaddress.ip_network("172.16.0.0/12"),
-        ipaddress.ip_network("192.168.0.0/16"),
-        ipaddress.ip_network("127.0.0.0/8"),
-        ipaddress.ip_network("169.254.0.0/16"),
-        ipaddress.ip_network("fc00::/7"),
-        ipaddress.ip_network("::1/128"),
-    ]
-    try:
-        ip = ipaddress.ip_address(_sock.gethostbyname(host))
-        return not any(ip in net for net in _PRIVATE)
-    except Exception:
-        return True   # unknown host → allow; will fail at connect time
+    return check_destination(host, port)[0]
 
 
 def _ssrf_blocked_response():
@@ -110,7 +96,8 @@ def _ssrf_blocked_response():
         "ok": False,
         "error": (
             "SSRF protection active (SSRF_PROTECTION=block): "
-            "host resolves to a private/loopback address. "
+            "the host cannot be resolved or resolves to a non-public address "
+            "(private, loopback, link-local, CGNAT…). "
             "Set SSRF_PROTECTION=off to allow connections to internal hosts."
         )
     }), 400
@@ -123,6 +110,8 @@ def _deliver_webhook(
 
     Called in a daemon thread — does not block document processing.
     Uses only the standard library (urllib.request) to avoid extra dependencies.
+    Connections go through the SSRF guard (dispatch/netguard.py); redirects
+    are never followed (a 3xx counts as a failed attempt).
     """
     import urllib.request as _req
     import urllib.error   as _err
@@ -151,7 +140,7 @@ def _deliver_webhook(
             time.sleep(delay)
         try:
             request = _req.Request(url, data=body, headers=headers, method="POST")
-            with _req.urlopen(request, timeout=10) as resp:
+            with guarded_urlopen(request, timeout=10) as resp:
                 code = resp.status
             if 200 <= code < 300:
                 log_event("info",
@@ -161,8 +150,20 @@ def _deliver_webhook(
             log_event("warning",
                       t("webhook.log_attempt", attempt=attempt, msg=f"HTTP {code}"),
                       source_file)
+        except _err.HTTPError as exc:
+            msg = f"HTTP {exc.code}"
+            if 300 <= exc.code < 400:
+                msg += f" (redirect to {exc.headers.get('Location', '?')} not followed)"
+            log_event("warning",
+                      t("webhook.log_attempt", attempt=attempt, msg=msg),
+                      source_file)
         except _err.URLError as exc:
             reason = getattr(exc, "reason", str(exc))
+            if isinstance(reason, SSRFBlocked):
+                log_event("warning",
+                          f"Webhook SSRF blocked (SSRF_PROTECTION=block): {reason}",
+                          source_file)
+                return   # policy refusal: retrying cannot help
             log_event("warning",
                       t("webhook.log_attempt", attempt=attempt, msg=reason),
                       source_file)

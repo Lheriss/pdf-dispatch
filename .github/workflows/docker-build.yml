@@ -40,11 +40,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r splitter/requirements.txt
 
+      # Audits the dependency set resolved from requirements.txt. No advisory
+      # is ignored: any known vulnerability fails the build. (The former
+      # --ignore-vuln PYSEC-2025-49 exception no longer matched anything and
+      # was removed in v1.8.1.) The OS packages and the libraries actually
+      # installed in the image are scanned separately by Trivy below.
       - name: Security audit (pip-audit)
         run: |
           pip install pip-audit
-          pip-audit -r splitter/requirements.txt --ignore-vuln PYSEC-2025-49
-        continue-on-error: false
+          pip-audit -r splitter/requirements.txt
 
       - name: Python syntax check
         run: python3 -c "import ast; ast.parse(open('splitter/app.py').read()); print('OK')"
@@ -64,7 +68,7 @@ jobs:
       - name: JS functional tests
         run: node tests/test_js_functional.js
 
-      - name: API, webhook and authentication tests (pytest)
+      - name: API, webhook, authentication and SSRF tests (pytest)
         run: |
           pip install pytest
           python3 -m pytest -q
@@ -167,6 +171,24 @@ jobs:
           sleep 15
           curl -f http://localhost:5000/healthz
           docker stop test-splitter
+
+      # Vulnerability scan of the image that was just smoke-tested: Debian
+      # packages and the Python libraries installed in it. Fails the build on
+      # a CRITICAL or HIGH vulnerability that has a fix available (unfixed
+      # base-image CVEs are reported by the scan but do not block).
+      # The action is pinned to a full commit SHA (v0.36.0, published after
+      # the March 2026 trivy-action tag hijack, CVE-2026-33634) and the Trivy
+      # binary to an explicit version, so a moved tag cannot change what runs.
+      - name: Vulnerability scan (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.75.0
+          image-ref: ${{ steps.image.outputs.name }}:smoke-test
+          scan-type: image
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
 
       - name: Build and push multi-platform image (amd64 + arm64)
         if: github.event_name == 'push'

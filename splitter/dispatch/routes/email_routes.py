@@ -2,7 +2,6 @@
 dispatch/routes/email_routes.py
 Blueprints: IMAP email configuration management.
 """
-import imaplib
 import re
 import uuid
 
@@ -17,6 +16,7 @@ from dispatch.email_poller import (
 )
 from dispatch.i18n import t
 from dispatch.state import log_event
+from dispatch.netguard import GuardedIMAP4, GuardedIMAP4_SSL, SSRFBlocked
 from dispatch.webhook import _ssrf_blocked_response, _ssrf_safe
 
 bp = Blueprint("email_routes", __name__)
@@ -228,7 +228,7 @@ def api_email_test():
 
     log.info(f"IMAP test [{name}]: host={host} port={port} user={username} ssl={verify_ssl} folder={folder}")
 
-    if not _ssrf_safe(host):
+    if not _ssrf_safe(host, port):
         log_event("warning", f"Test IMAP SSRF blocked (SSRF_PROTECTION=block): {host}")
         return _ssrf_blocked_response()
 
@@ -239,9 +239,9 @@ def api_email_test():
             ctx.verify_mode    = _ssl.CERT_NONE
         log.info(f"IMAP test [{name}]: opening {'SSL' if use_ssl else 'plain'} connection to {host}:{port}...")
         if use_ssl:
-            M = imaplib.IMAP4_SSL(host, port, ssl_context=ctx, timeout=10)
+            M = GuardedIMAP4_SSL(host, port, ssl_context=ctx, timeout=10)
         else:
-            M = imaplib.IMAP4(host, port)
+            M = GuardedIMAP4(host, port)
             try: M.socket().settimeout(15)
             except Exception: pass
         log.info(f"IMAP test [{name}]: logging in as {username} (password {len(password)} chars)...")
@@ -254,6 +254,9 @@ def api_email_test():
         log.info(msg_ok)
         log_event("info", "📧 " + t("log.email_test_success", name=name, count=count, folder=folder))
         return jsonify({"ok": True, "message": t("email.test_success_message", count=count, folder=folder)})
+    except SSRFBlocked as e:
+        log_event("warning", f"Test IMAP SSRF blocked (SSRF_PROTECTION=block): {e}")
+        return _ssrf_blocked_response()
     except Exception as e:
         msg_err = (f"IMAP test [{name}] FAILED: host={host}:{port} user={username} "
                    f"pwd_len={len(password)} ssl={verify_ssl} -> {type(e).__name__}: {e}")
