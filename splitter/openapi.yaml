@@ -95,6 +95,15 @@ components:
         `APP_USERNAME` / `APP_PASSWORD`). Accepted when sent; never solicited.
 
   schemas:
+    Health:
+      type: object
+      properties:
+        ok:     {type: boolean}
+        checks:
+          type: object
+          additionalProperties: {type: string, enum: [ok, failed, disabled, "n/a"]}
+          example: {watcher: ok, input_dir: ok, data_dir: ok, disk: ok, email_poller: disabled, retention: disabled}
+        failed: {type: array, items: {type: string}}
 
     OkTrue:
       type: object
@@ -267,18 +276,25 @@ paths:
     get:
       summary: Health check
       description: >
-        Always returns `{"ok": true}`. Not protected by authentication.
-        Used by Docker HEALTHCHECK.
+        Runs the internal health checks (watcher, input folder, DATA_DIR
+        writable, free disk space, IMAP poller and retention thread when
+        enabled). Not protected by authentication; used by the Docker
+        HEALTHCHECK and external monitors. Only check names and statuses are
+        returned (`ok`, `failed`, `disabled`, `n/a`).
       operationId: healthz
       tags: [system]
       security: []
       responses:
         "200":
-          description: Service is running.
+          description: Every check passes.
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/OkTrue"
+              schema: {$ref: "#/components/schemas/Health"}
+        "503":
+          description: At least one check failed (listed in `failed`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Health"}
 
   # ── Config & state ─────────────────────────────────────────────────────────
 

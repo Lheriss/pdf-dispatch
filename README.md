@@ -327,6 +327,7 @@ On first startup, pdf-dispatch creates all required subfolders inside `/data`:
 | `FILE_STABLE_TIMEOUT` | `60` | Max seconds to wait for a file to stop changing before processing. Files that exceed this timeout (zero bytes, or still growing) are moved to `/data/output/error/`. |
 | `FILE_STABLE_INTERVAL` | `2` | Seconds between two file-size checks during stabilisation |
 | `MAX_LOG_ENTRIES` | `200` | Maximum number of entries kept in the activity log |
+| `HEALTHZ_MIN_FREE_MB` | `100` | Free space in `DATA_DIR` (MB) below which `/healthz` reports the `disk` check as failed (HTTP 503) |
 | `MAX_UPLOAD_MB` | `50` | Maximum file size accepted by `/api/upload` and the web drag-and-drop. Files exceeding this limit are rejected immediately (HTTP 400 with a clear error message) — no bytes are written to disk. Reduce if memory is constrained. |
 | `MAX_PAGES` | `100` | Maximum number of pages a PDF may contain. Checked after upload using pypdf (no rendering — cheap) and before the watchdog starts barcode scanning. PDFs over the limit are deleted and an error is returned to the caller. At `BARCODE_DPI=300`, each A4 page requires ~26 MB of RAM during scanning; a 200-page PDF would need ~5 GB and crash the container. |
 | `MAX_CONCURRENT_PROCESSING` | `2` | Maximum number of PDFs processed simultaneously. All three processing modes (watchdog/file-drop, API upload, email attachment) funnel through the same `process_file` function; this setting limits how many run concurrently regardless of source. At `BARCODE_DPI=300` each concurrent render occupies ~26 MB per page; more than 2–3 simultaneous renders can saturate the NAS CPU/RAM and make the Flask API unresponsive (GET `/api/tasks` latency spikes from 2 ms to tens of seconds). Increase only if your hardware has spare capacity. |
@@ -758,7 +759,7 @@ The `trigger` field (no-barcode fallback) and `split_values` are independent —
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| `GET` | `/healthz` | Health check (no auth) |
+| `GET` | `/healthz` | Health check (no auth) — `200` when healthy, `503` with the failed checks otherwise. See [Monitoring](#monitoring) |
 | `GET` | `/api/state` | Full state: stats, log, config, email status |
 | `POST` | `/api/config` | Update any config key(s) |
 | `POST` | `/api/upload` | Upload PDFs → returns `task_id` per file |
@@ -773,6 +774,23 @@ The `trigger` field (no-barcode fallback) and `split_values` are independent —
 | `POST` | `/api/settings/password` | Change the administrator password (`current_password`, `new_password`) |
 | `POST` | `/api/retention/run` | Run one retention cleanup cycle now (see [Automatic retention](#automatic-retention)) |
 | `POST` | `/api/stats/reset` | Reset processing statistics |
+
+### Monitoring
+
+`GET /healthz` is public (no credential) and meant for the Docker `HEALTHCHECK` and external monitors (Uptime Kuma, Healthchecks, …). It runs real checks, not just "the web server answers":
+
+| Check | Fails when |
+|-------|------------|
+| `watcher` | the watcher on the input folder has stopped |
+| `input_dir` | the input folder is missing |
+| `data_dir` | a file cannot be created in `DATA_DIR` (volume missing, read-only, permissions) |
+| `disk` | less than `HEALTHZ_MIN_FREE_MB` (default 100) MB free in `DATA_DIR` |
+| `email_poller` | an email account is enabled but the IMAP thread is dead or its loop has been silent for 30 min |
+| `retention` | retention is enabled but its thread is dead |
+
+Healthy: HTTP `200` `{"ok": true, "checks": {...}, "failed": []}`. Unhealthy: HTTP **`503`** with the failed check names in `failed`. A check that does not apply reports `disabled`. The response carries no path, version or error detail; details are written to the container log when the state changes.
+
+Uptime Kuma: monitor type *HTTP(s)*, URL `http://<host>:5880/healthz` — an unhealthy instance answers 503, which Kuma reports as down. (With *HTTP(s) – Keyword*, use the keyword `"ok":true`, without a space: the response is compact JSON.) Do not monitor an `/api/…` route: those require authentication and answer 401.
 
 ### Full API reference
 
@@ -864,6 +882,7 @@ pdf-dispatch/
 │   ├── test_blank_split.py      ← blank-page separators through the real pipeline (rendering stubbed)
 │   ├── test_ssrf.py             ← outbound-connection guard: address policy, fail-closed DNS, rebinding, redirects, IMAP
 │   ├── test_hardening.py        ← EMAIL_SECRET fail-closed, hook environment and timeout, anonymous access refused on every route
+│   ├── test_health.py           ← /healthz: each check driven into its failing state (503)
 │   ├── test_python_core.py      ← unit tests for core Python functions (86 tests)
 │   ├── test_js_t_collision.py   ← detects t() key shadowing bugs in app.js
 │   ├── test_i18n_keys.py        ← verifies FR/EN key consistency
@@ -883,6 +902,7 @@ pdf-dispatch/
     │   ├── state.py        ← in-memory shared state (locks, log, task tracking)
     │   ├── hook.py         ← post-processing hook (POST_PROCESS_SCRIPT)
     │   ├── netguard.py     ← SSRF guard for every outbound connection (webhooks, IMAP)
+    │   ├── health.py       ← /healthz checks (watcher, DATA_DIR, disk, IMAP poller, retention)
     │   ├── webhook.py      ← outbound webhook (payload, HMAC, async delivery)
     │   ├── processing.py   ← full PDF pipeline (stabilisation, barcode scan, blank-page detection, split, write)
     │   ├── retention.py    ← background retention thread (deletes old processed/error files)
@@ -926,6 +946,7 @@ re-exports symbols for the test suite. The application logic lives in the
 | `hook.py` | `_run_post_process_hook` — runs `POST_PROCESS_SCRIPT` after each file |
 | `netguard.py` | Outbound-connection guard (SSRF): address policy, fail-closed resolution, connection to the checked address only, no redirects; guarded `urlopen` and IMAP classes |
 | `webhook.py` | Payload builder, async HMAC-signed delivery with retries (through `netguard`) |
+| `health.py` | `/healthz` checks: watcher alive, input folder, `DATA_DIR` writable, free disk space, IMAP poller and retention threads when enabled |
 | `processing.py` | Full PDF pipeline: filename construction, folder routing, file stabilisation, two-pass barcode scan, blank-page detection, split/write, metadata, separator generation, `process_file` |
 | `retention.py` | Background retention thread: deletes files older than `RETENTION_DAYS_*` from `output/processed/` and `output/error/`, prunes emptied per-trigger subfolders; on-demand cycle for `/api/retention/run` |
 | `email_poller.py` | Background IMAP thread: polling, filters, attachment download, Message-ID deduplication, retention limits |
@@ -983,7 +1004,7 @@ GitHub Actions (`.github/workflows/docker-build.yml`) runs on pushes to `main` a
 2. Python syntax check; JS syntax check
 3. i18n key consistency; `t()` collision detection
 4. Python core unit tests (`test_python_core.py`), JS functional tests, and the pytest suite (API, webhook and authentication tests)
-5. Docker image build (with smoke test: container starts and `/healthz` responds). Pull requests build for `linux/amd64` only and do not push.
+5. Docker image build (with smoke test: container starts and `/healthz` reports healthy). Pull requests build for `linux/amd64` only and do not push.
 6. On push (not PRs), build and push a multi-architecture image (`linux/amd64`, `linux/arm64`) to `ghcr.io/lheriss/pdf-dispatch` with tags by ref:
    - push to `main` → `:latest` + `:<sha8>`
    - push to `dev` → `:dev` + `:<sha8>`

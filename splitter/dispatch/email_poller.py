@@ -51,6 +51,8 @@ EMAIL_MAX_IDS  = 1000
 EMAIL_MAX_DAYS = 90
 _email_thread       = None
 _email_stop         = threading.Event()
+# Time of the last loop iteration, read by /healthz to detect a stuck poller.
+_email_heartbeat    = 0.0
 
 def _email_username_key(username: str) -> str:
     """Normalise an IMAP username: 'user' and 'user@domain' are equivalent."""
@@ -253,7 +255,9 @@ def _imap_poll():
 
     Stops when _email_stop is set (stop_email_poller, called by
     _restart_watcher on an email configuration change)."""
+    global _email_heartbeat
     while not _email_stop.is_set():
+        _email_heartbeat = time.time()
         cfg     = get_config()
         configs = cfg.get("email_configs", [])
         now     = time.time()

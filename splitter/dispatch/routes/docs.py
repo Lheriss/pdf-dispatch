@@ -101,8 +101,16 @@ def api_docs():
 
 @bp.route("/healthz")
 def healthz():
-    """Health check (used by HEALTHCHECK), not protected by authentication."""
-    return jsonify({"ok": True})
+    """Health check — public (Docker HEALTHCHECK, Uptime Kuma…).
+
+    200 {"ok": true, "checks": {...}} when every check passes, 503 with the
+    list of failed checks otherwise. See dispatch/health.py.
+    """
+    from dispatch.health import run_checks
+    result = run_checks()
+    resp = jsonify(result)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp, (200 if result["ok"] else 503)
 
 
 

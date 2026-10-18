@@ -176,7 +176,9 @@ jobs:
             -e APP_VERSION="ci" \
             ${{ steps.image.outputs.name }}:smoke-test
           sleep 15
-          curl -f http://localhost:5000/healthz
+          # /healthz runs the real checks (watcher, DATA_DIR writable, disk…):
+          # 503 — and a failed step — if any of them fails in the container.
+          curl -fsS http://localhost:5000/healthz; echo
           docker stop test-splitter
 
       # Vulnerability scan of the image that was just smoke-tested: Debian
