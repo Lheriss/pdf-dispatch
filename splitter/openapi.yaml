@@ -1099,6 +1099,13 @@ paths:
                 properties:
                   ok:      {type: boolean, enum: [true]}
                   message: {type: string, example: "3 message(s) in INBOX"}
+        "400":
+          description: >
+            Destination refused by `SSRF_PROTECTION=block`: the host cannot be
+            resolved or resolves to a non-public address.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
         "502":
           description: Connection failed (wrong credentials, network error, etc.).
           content:
@@ -1163,6 +1170,9 @@ paths:
         ```
 
         The `config_override` field is omitted when no override was used.
+
+        Redirects are not followed: a 3xx answer is returned as
+        `{"ok": false, "code": 3xx, "error": "HTTP 302 — redirect to … not followed"}`.
       operationId: testWebhook
       tags: [webhook]
       responses:
@@ -1176,7 +1186,10 @@ paths:
                   ok:   {type: boolean}
                   code: {type: integer, description: HTTP status from the target.}
         "400":
-          description: No webhook URL configured.
+          description: >
+            No webhook URL configured, or destination refused by
+            `SSRF_PROTECTION=block` (host cannot be resolved or resolves to a
+            non-public address).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}

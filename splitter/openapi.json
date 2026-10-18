@@ -1702,6 +1702,16 @@
               }
             }
           },
+          "400": {
+            "description": "Destination refused by `SSRF_PROTECTION=block`: the host cannot be resolved or resolves to a non-public address.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Connection failed (wrong credentials, network error, etc.).",
             "content": {
@@ -1760,7 +1770,7 @@
     "/api/webhook/test": {
       "post": {
         "summary": "Send test webhook",
-        "description": "Sends a test payload to the configured webhook URL synchronously and\nreturns the HTTP status code received by the target.\n\nThe test payload has `\"event\": \"test\"` and otherwise the same structure\nas a real `file.processed` event. When a file is processed with a\nper-file config override, the payload includes a `\"config_override\"` field:\n\n```json\n{\n  \"event\": \"file.processed\",\n  \"source_file\": \"batch.pdf\",\n  \"status\": \"success\",\n  \"triggers\": [\"FACTURE\"],\n  \"documents\": [...],\n  \"docs_count\": 1,\n  \"error\": \"\",\n  \"config_override\": {\n    \"separator_placement\": \"after\",\n    \"split_values\": [{\"value\": \"FACTURE\", \"page_handling\": \"delete\", \"case_sensitive\": true}]\n  }\n}\n```\n\nThe `config_override` field is omitted when no override was used.\n",
+        "description": "Sends a test payload to the configured webhook URL synchronously and\nreturns the HTTP status code received by the target.\n\nThe test payload has `\"event\": \"test\"` and otherwise the same structure\nas a real `file.processed` event. When a file is processed with a\nper-file config override, the payload includes a `\"config_override\"` field:\n\n```json\n{\n  \"event\": \"file.processed\",\n  \"source_file\": \"batch.pdf\",\n  \"status\": \"success\",\n  \"triggers\": [\"FACTURE\"],\n  \"documents\": [...],\n  \"docs_count\": 1,\n  \"error\": \"\",\n  \"config_override\": {\n    \"separator_placement\": \"after\",\n    \"split_values\": [{\"value\": \"FACTURE\", \"page_handling\": \"delete\", \"case_sensitive\": true}]\n  }\n}\n```\n\nThe `config_override` field is omitted when no override was used.\n\nRedirects are not followed: a 3xx answer is returned as\n`{\"ok\": false, \"code\": 3xx, \"error\": \"HTTP 302 — redirect to … not followed\"}`.\n",
         "operationId": "testWebhook",
         "tags": [
           "webhook"
@@ -1786,7 +1796,7 @@
             }
           },
           "400": {
-            "description": "No webhook URL configured.",
+            "description": "No webhook URL configured, or destination refused by `SSRF_PROTECTION=block` (host cannot be resolved or resolves to a non-public address).\n",
             "content": {
               "application/json": {
                 "schema": {

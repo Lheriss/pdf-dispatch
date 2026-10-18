@@ -340,7 +340,7 @@ On first startup, pdf-dispatch creates all required subfolders inside `/data`:
 | `MEM_LIMIT` | `2g` | Hard memory cap for the container (`mem_limit` + `memswap_limit`). At 300 DPI each A4 page requires ~26 MB of RAM during rasterisation; a 60-page PDF with `MAX_CONCURRENT_PROCESSING=2` can peak at ~3 GB. **If this limit is exceeded, Docker kills the container with exit code 137 (OOM kill)** — increase the limit on machines with more RAM, or lower `MAX_PAGES` and `MAX_CONCURRENT_PROCESSING` to reduce peak usage. Setting `memswap_limit` equal to `mem_limit` disables swap for this container, which avoids latency spikes from disk-backed memory. |
 | `CPU_LIMIT` | — | CPU quota (`cpus`), expressed in fractional cores (`1.5` = 1.5 cores). **Not set by default** — requires `CONFIG_CFS_BANDWIDTH` kernel support and mounted cgroup CPU controllers. Absent from the default `docker-compose.yml` because it causes a fatal error on NAS kernels that lack this support (Synology DSM, some ARM boards). To enable it on a compatible host, add `cpus: "${CPU_LIMIT:-2.0}"` to the compose file. |
 | `PIDS_LIMIT` | `256` | Maximum number of processes and threads (`pids_limit`). Protects against runaway thread creation from a defective PDF or a bug in the thread pool. Reduce on very constrained devices; increase if you see "fork: Resource temporarily unavailable" errors under heavy load. |
-| `SSRF_PROTECTION` | `off` | When set to `block`, outbound HTTP requests made by pdf-dispatch (webhook deliveries, webhook test, IMAP connection test) are checked against the resolved IP of the destination host. Requests targeting private, loopback or link-local addresses (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`, `fc00::/7`, `::1`) are blocked and return HTTP 400. Set to `off` (default) if you legitimately send webhooks to local services (home automation hub, internal Zapier relay, etc.). |
+| `SSRF_PROTECTION` | `off` | When set to `block`, every outbound connection pdf-dispatch makes from its configuration — webhook deliveries, webhook test, IMAP connection test **and IMAP polling** — is restricted to public addresses. The host is resolved to all its IPv4/IPv6 addresses; the connection is refused (HTTP 400 on the test routes) if resolution fails or if any address is private, loopback, link-local, multicast, reserved, unspecified (`0.0.0.0`, `::`), in the shared CGNAT/Tailscale range `100.64.0.0/10`, or an IPv4-mapped form of those. The socket connects to the address that was checked (no second lookup, so DNS rebinding cannot slip through), and `HTTP(S)_PROXY` variables are ignored for webhooks. Set to `off` (default) if you legitimately send webhooks to local services (home automation hub, internal relay, etc.) or poll a mail server on your LAN. In both modes webhook redirects are never followed. |
 
 ---
 
@@ -810,6 +810,8 @@ npx @openapitools/openapi-generator-cli generate \
 - **Activity log** — control characters in messages posted via `/api/log` are sanitised (replaced with spaces) to prevent log injection and terminal escape sequences.
 - **Webhook URL sanitisation** — `webhook_url` and `webhook_secret` are stripped of CR (`\r`) and LF (`\n`) characters on every config update to prevent HTTP header injection. A value such as `"\r\nX-Inject: bad"` is stored and delivered as `"X-Inject: bad"` (CRLF prefix removed).
 - **`/api/recent?n=`** — non-integer values return HTTP 400 instead of 500.
+- **Outbound connections (SSRF)** — webhook deliveries, the webhook test, the IMAP connection test and IMAP polling all go through one guard (`dispatch/netguard.py`). Webhook redirects (3xx) are **never followed**, in any mode: the response is reported as a failure naming the redirect target. With `SSRF_PROTECTION=block`, destinations are restricted to public addresses — fail-closed resolution of every IPv4/IPv6 address, private/loopback/link-local/CGNAT/reserved ranges refused, connection made to the checked address only (DNS rebinding resistant). The default is `off` because sending webhooks to a local Home Assistant or polling a LAN mail server is a common, legitimate setup; enable `block` when those destinations are all on the internet, or when people other than you can edit the configuration.
+- **Dependency and image scanning** — every CI run audits the Python dependencies with `pip-audit` (no advisory ignored) and scans the built image (Debian packages + installed Python libraries) with Trivy, failing on any CRITICAL or HIGH vulnerability that has a fix. The Trivy action is pinned to a commit SHA. For a reproducible deployment, pin the image by version tag (`:v1.8.1`) or digest rather than `:latest`.
 - **IMAP connection** — plain (`use_ssl: false`, port 143) or SSL/TLS (`use_ssl: true`, default, port 993). Use plain only for servers on a trusted internal network (Docker, VPN). Combine with `verify_ssl: false` only for self-signed certificates on private infrastructure.
 - **Resource limits** — several env vars protect against resource exhaustion:
   - `MAX_UPLOAD_MB` (default 50) and `MAX_PAGES` (default 100): reject oversized files before any rendering. A 200-page PDF at 300 DPI needs ~5 GB of RAM and can crash Docker.
@@ -856,6 +858,8 @@ pdf-dispatch/
 │   ├── test_api.py              ← API route tests (Flask test client, 44 tests)
 │   ├── test_webhook.py          ← webhook integration tests (local HTTP receiver, 37 tests)
 │   ├── test_auth.py             ← authentication matrix: setup, sign-in, sessions, CSRF, password change, API key, Basic
+│   ├── test_blank_split.py      ← blank-page separators through the real pipeline (rendering stubbed)
+│   ├── test_ssrf.py             ← outbound-connection guard: address policy, fail-closed DNS, rebinding, redirects, IMAP
 │   ├── test_python_core.py      ← unit tests for core Python functions (86 tests)
 │   ├── test_js_t_collision.py   ← detects t() key shadowing bugs in app.js
 │   ├── test_i18n_keys.py        ← verifies FR/EN key consistency
@@ -874,7 +878,8 @@ pdf-dispatch/
     │   ├── i18n.py         ← translation loader and t() function
     │   ├── state.py        ← in-memory shared state (locks, log, task tracking)
     │   ├── hook.py         ← post-processing hook (POST_PROCESS_SCRIPT)
-    │   ├── webhook.py      ← outbound webhook (SSRF guard, HMAC, async delivery)
+    │   ├── netguard.py     ← SSRF guard for every outbound connection (webhooks, IMAP)
+    │   ├── webhook.py      ← outbound webhook (payload, HMAC, async delivery)
     │   ├── processing.py   ← full PDF pipeline (stabilisation, barcode scan, blank-page detection, split, write)
     │   ├── retention.py    ← background retention thread (deletes old processed/error files)
     │   ├── email_poller.py ← background IMAP poller (threading, deduplication, limits)
@@ -915,7 +920,8 @@ re-exports symbols for the test suite. The application logic lives in the
 | `i18n.py` | Loads `fr.json` / `en.json`; `t(key, **kwargs)` with cascade fallback |
 | `state.py` | In-memory shared state: locks, processing semaphore, activity log, async task store, per-file config overrides |
 | `hook.py` | `_run_post_process_hook` — runs `POST_PROCESS_SCRIPT` after each file |
-| `webhook.py` | SSRF guard, payload builder, async HMAC-signed delivery with retries |
+| `netguard.py` | Outbound-connection guard (SSRF): address policy, fail-closed resolution, connection to the checked address only, no redirects; guarded `urlopen` and IMAP classes |
+| `webhook.py` | Payload builder, async HMAC-signed delivery with retries (through `netguard`) |
 | `processing.py` | Full PDF pipeline: filename construction, folder routing, file stabilisation, two-pass barcode scan, blank-page detection, split/write, metadata, separator generation, `process_file` |
 | `retention.py` | Background retention thread: deletes files older than `RETENTION_DAYS_*` from `output/processed/` and `output/error/`, prunes emptied per-trigger subfolders; on-demand cycle for `/api/retention/run` |
 | `email_poller.py` | Background IMAP thread: polling, filters, attachment download, Message-ID deduplication, retention limits |
