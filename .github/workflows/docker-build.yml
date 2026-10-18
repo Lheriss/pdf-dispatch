@@ -69,9 +69,16 @@ jobs:
         run: node tests/test_js_functional.js
 
       - name: API, webhook, authentication and SSRF tests (pytest)
+        # On failure, each failing test and its first error line become a
+        # GitHub annotation, visible in the run summary without opening the log.
         run: |
           pip install pytest
-          python3 -m pytest -q
+          set -o pipefail
+          python3 -m pytest -q -rfE 2>&1 | tee pytest-output.txt || {
+            grep -E '^(FAILED|ERROR) ' pytest-output.txt | head -20 | sed 's/^/::error title=pytest::/'
+            grep -E '^E ' pytest-output.txt | head -20 | sed 's/^/::error title=pytest detail::/'
+            exit 1
+          }
 
       # -- Docker ------------------------------------------------------------
 

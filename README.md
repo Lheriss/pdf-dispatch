@@ -150,7 +150,7 @@ These three items **must** be adapted before first launch — the defaults will 
 |------|-----|-----|
 | `PUID` / `PGID` | Files must be owned by your user, not root | Run `id <youruser>` on the host |
 | Volume path | Points to your actual data folder | Replace `/your/data/path` |
-| `EMAIL_SECRET` | Without it, IMAP passwords are lost on every restart | `openssl rand -hex 32` |
+| `EMAIL_SECRET` | Required to store IMAP passwords — without it, saving one is refused | `openssl rand -hex 32` |
 
 ### First sign-in
 
@@ -309,7 +309,7 @@ On first startup, pdf-dispatch creates all required subfolders inside `/data`:
 | `PUID` | — | UID of the host user who should own the output files |
 | `PGID` | — | GID of the host user |
 | `TZ` | `Europe/Zurich` | Container timezone |
-| `EMAIL_SECRET` | — | Encryption key for stored IMAP passwords. **Set this once and never change it** — changing it makes all stored passwords unreadable. Generate with `openssl rand -hex 32`. |
+| `EMAIL_SECRET` | — | Encryption key for stored IMAP passwords. **Required for email polling**: without it, saving an IMAP password is refused with an explicit error (no temporary key is generated, and the key is never written to the log). **Set this once and never change it** — a different key makes stored passwords unreadable; the activity log then says so explicitly, and re-entering the passwords fixes it. Generate with `openssl rand -hex 32`. |
 | `APP_LANGUAGE` | `fr` | Interface language at first startup (`fr` or `en`). After first launch the saved value in the config file takes precedence. |
 | `APP_USERNAME` | — | Predefined administrator username (with `APP_PASSWORD`). When both are set, the first-run setup is skipped, these credentials are used on the sign-in page and accepted in an HTTP Basic `Authorization` header, and they cannot be changed from the interface. |
 | `APP_PASSWORD` | — | Predefined administrator password (see `APP_USERNAME`). Changing it signs every browser out. |
@@ -340,7 +340,8 @@ On first startup, pdf-dispatch creates all required subfolders inside `/data`:
 | `MEM_LIMIT` | `2g` | Hard memory cap for the container (`mem_limit` + `memswap_limit`). At 300 DPI each A4 page requires ~26 MB of RAM during rasterisation; a 60-page PDF with `MAX_CONCURRENT_PROCESSING=2` can peak at ~3 GB. **If this limit is exceeded, Docker kills the container with exit code 137 (OOM kill)** — increase the limit on machines with more RAM, or lower `MAX_PAGES` and `MAX_CONCURRENT_PROCESSING` to reduce peak usage. Setting `memswap_limit` equal to `mem_limit` disables swap for this container, which avoids latency spikes from disk-backed memory. |
 | `CPU_LIMIT` | — | CPU quota (`cpus`), expressed in fractional cores (`1.5` = 1.5 cores). **Not set by default** — requires `CONFIG_CFS_BANDWIDTH` kernel support and mounted cgroup CPU controllers. Absent from the default `docker-compose.yml` because it causes a fatal error on NAS kernels that lack this support (Synology DSM, some ARM boards). To enable it on a compatible host, add `cpus: "${CPU_LIMIT:-2.0}"` to the compose file. |
 | `PIDS_LIMIT` | `256` | Maximum number of processes and threads (`pids_limit`). Protects against runaway thread creation from a defective PDF or a bug in the thread pool. Reduce on very constrained devices; increase if you see "fork: Resource temporarily unavailable" errors under heavy load. |
-| `SSRF_PROTECTION` | `off` | When set to `block`, every outbound connection pdf-dispatch makes from its configuration — webhook deliveries, webhook test, IMAP connection test **and IMAP polling** — is restricted to public addresses. The host is resolved to all its IPv4/IPv6 addresses; the connection is refused (HTTP 400 on the test routes) if resolution fails or if any address is private, loopback, link-local, multicast, reserved, unspecified (`0.0.0.0`, `::`), in the shared CGNAT/Tailscale range `100.64.0.0/10`, or an IPv4-mapped form of those. The socket connects to the address that was checked (no second lookup, so DNS rebinding cannot slip through), and `HTTP(S)_PROXY` variables are ignored for webhooks. Set to `off` (default) if you legitimately send webhooks to local services (home automation hub, internal relay, etc.) or poll a mail server on your LAN. In both modes webhook redirects are never followed. |
+| `SSRF_PROTECTION` | `off` | When set to `block`, every outbound connection pdf-dispatch makes from its configuration — webhook deliveries, webhook test, IMAP connection test **and IMAP polling** — is restricted to public addresses. The host is resolved to all its IPv4/IPv6 addresses; the connection is refused (HTTP 400 on the test routes) if resolution fails or if any address is private, loopback, link-local, multicast, reserved, unspecified (`0.0.0.0`, `::`), in the shared CGNAT/Tailscale range `100.64.0.0/10`, or an IPv4-mapped form of those. The socket connects to the address that was checked (no second lookup, so DNS rebinding cannot slip through), and `HTTP(S)_PROXY` variables are ignored for webhooks. To reach specific local services in this mode, list them in `SSRF_ALLOW`. Set to `off` (default) to allow every destination. In both modes webhook redirects are never followed. |
+| `SSRF_ALLOW` | — | Exceptions to `SSRF_PROTECTION=block`: comma- or space-separated IP addresses or CIDR ranges, optionally restricted to one port — e.g. `192.168.1.10:8123` (Home Assistant), `192.168.1.20:993` (LAN mail server), `[fd00::5]:993`, `10.0.0.0/24`. Matched against the addresses the host **resolves to**, never against host names (a host-name entry is ignored), so a name cannot be re-pointed to an unlisted internal address. Invalid entries are ignored and reported in the log at startup. Shown in `/api/runtime`. |
 
 ---
 
@@ -602,6 +603,8 @@ Run an arbitrary script after every file processed by pdf-dispatch. Useful for c
 
 The script must be executable (`chmod +x`). Its stdout and stderr are forwarded line-by-line to the activity log. A non-zero exit code logs a warning but does not affect document processing.
 
+The script runs in its own process group: on timeout, it is killed **together with any background process it started**. It inherits the container environment — so variables you add for it (a notification token, for example) are available — **except pdf-dispatch's own secrets**: `EMAIL_SECRET`, `API_KEY` and `APP_PASSWORD` are removed before the script starts. Only the host administrator can set `POST_PROCESS_SCRIPT` (environment variable, not configurable through the API or the interface).
+
 **docker-compose.yml setup:**
 
 ```yaml
@@ -792,7 +795,7 @@ npx @openapitools/openapi-generator-cli generate \
 
 ## Security
 
-- **IMAP passwords** are encrypted (Fernet/AES) with a key derived from `EMAIL_SECRET`. They are never transmitted to the browser.
+- **IMAP passwords** are encrypted (Fernet/AES) with a key derived from `EMAIL_SECRET`. They are never transmitted to the browser. The key is never written to the log. Without `EMAIL_SECRET`, storing a password is refused (fail-closed) instead of using a throwaway key; a password that can no longer be decrypted (key changed or lost) is reported as such in the activity log and by the connection test.
 - **Two separate credentials**: people sign in with the **administrator account** (username + password); scripts and integrations use the **API key**. A leaked API key does not open the web interface, and regenerating it does not sign anyone out.
 - **First-run setup** (same approach as Jenkins): until the administrator account exists, a one-time setup code is printed in the container log and required by the setup page, so nobody else on the network can claim a fresh instance. The code is kept in memory only and is regenerated at each start until setup is completed.
 - **Administrator password** is stored as a salted **scrypt** hash (`werkzeug.security`), never in clear; minimum 8 characters. It can be changed from the interface (current password required), which signs every other browser out. `APP_USERNAME` / `APP_PASSWORD`, when set, take precedence and are never written to disk.
@@ -810,7 +813,7 @@ npx @openapitools/openapi-generator-cli generate \
 - **Activity log** — control characters in messages posted via `/api/log` are sanitised (replaced with spaces) to prevent log injection and terminal escape sequences.
 - **Webhook URL sanitisation** — `webhook_url` and `webhook_secret` are stripped of CR (`\r`) and LF (`\n`) characters on every config update to prevent HTTP header injection. A value such as `"\r\nX-Inject: bad"` is stored and delivered as `"X-Inject: bad"` (CRLF prefix removed).
 - **`/api/recent?n=`** — non-integer values return HTTP 400 instead of 500.
-- **Outbound connections (SSRF)** — webhook deliveries, the webhook test, the IMAP connection test and IMAP polling all go through one guard (`dispatch/netguard.py`). Webhook redirects (3xx) are **never followed**, in any mode: the response is reported as a failure naming the redirect target. With `SSRF_PROTECTION=block`, destinations are restricted to public addresses — fail-closed resolution of every IPv4/IPv6 address, private/loopback/link-local/CGNAT/reserved ranges refused, connection made to the checked address only (DNS rebinding resistant). The default is `off` because sending webhooks to a local Home Assistant or polling a LAN mail server is a common, legitimate setup; enable `block` when those destinations are all on the internet, or when people other than you can edit the configuration.
+- **Outbound connections (SSRF)** — webhook deliveries, the webhook test, the IMAP connection test and IMAP polling all go through one guard (`dispatch/netguard.py`). Webhook redirects (3xx) are **never followed**, in any mode: the response is reported as a failure naming the redirect target. With `SSRF_PROTECTION=block`, destinations are restricted to public addresses — fail-closed resolution of every IPv4/IPv6 address, private/loopback/link-local/CGNAT/reserved ranges refused, connection made to the checked address only (DNS rebinding resistant). The default is `off` because sending webhooks to a local Home Assistant or polling a LAN mail server is a common, legitimate setup. **Recommended:** `block` with the few local services you use listed in `SSRF_ALLOW` (for example `192.168.1.10:8123`) — the rest of your network stays out of reach of a misconfigured or malicious webhook URL.
 - **Dependency and image scanning** — every CI run audits the Python dependencies with `pip-audit` (no advisory ignored) and scans the built image (Debian packages + installed Python libraries) with Trivy, failing on any CRITICAL or HIGH vulnerability that has a fix. The Trivy action is pinned to a commit SHA. For a reproducible deployment, pin the image by version tag (`:v1.8.1`) or digest rather than `:latest`.
 - **IMAP connection** — plain (`use_ssl: false`, port 143) or SSL/TLS (`use_ssl: true`, default, port 993). Use plain only for servers on a trusted internal network (Docker, VPN). Combine with `verify_ssl: false` only for self-signed certificates on private infrastructure.
 - **Resource limits** — several env vars protect against resource exhaustion:
@@ -860,6 +863,7 @@ pdf-dispatch/
 │   ├── test_auth.py             ← authentication matrix: setup, sign-in, sessions, CSRF, password change, API key, Basic
 │   ├── test_blank_split.py      ← blank-page separators through the real pipeline (rendering stubbed)
 │   ├── test_ssrf.py             ← outbound-connection guard: address policy, fail-closed DNS, rebinding, redirects, IMAP
+│   ├── test_hardening.py        ← EMAIL_SECRET fail-closed, hook environment and timeout, anonymous access refused on every route
 │   ├── test_python_core.py      ← unit tests for core Python functions (86 tests)
 │   ├── test_js_t_collision.py   ← detects t() key shadowing bugs in app.js
 │   ├── test_i18n_keys.py        ← verifies FR/EN key consistency

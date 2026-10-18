@@ -66,12 +66,13 @@ following items (all documented in the [README](README.md)):
       authentication (Authelia, Authentik, Nginx basic auth, …)
 - [ ] `EMAIL_SECRET` generated with `openssl rand -hex 32` and stored
       securely — never change it after setting up email accounts
+      (required for email polling: without it, IMAP passwords are refused)
 - [ ] `API_KEY` set if automated API access is required
 - [ ] HTTPS termination at the reverse proxy (HTTP Basic auth transmits
       credentials in base64 — plaintext equivalent without TLS)
 - [ ] `MEM_LIMIT` and `MAX_PAGES` set conservatively for untrusted input
-- [ ] `SSRF_PROTECTION=block` unless webhooks or IMAP must reach hosts on
-      your own network (see the README, *Outbound connections*)
+- [ ] `SSRF_PROTECTION=block`, with the local services webhooks or IMAP must
+      reach listed in `SSRF_ALLOW` (see the README, *Outbound connections*)
 - [ ] Docker container not running as root (verified by default via
       `gosu` in `entrypoint.sh`)
 - [ ] Container not on a `--network host` bridge with sensitive services

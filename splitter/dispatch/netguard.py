@@ -18,6 +18,13 @@ through guarded_create_connection(). When SSRF_PROTECTION=block:
   • HTTP redirects are never followed (see guarded_urlopen), so a public
     endpoint cannot bounce the request to an internal URL.
 
+Exceptions (SSRF_ALLOW): with protection on, a non-public address is still
+accepted if it matches an SSRF_ALLOW entry — an IP address or CIDR range,
+optionally restricted to one port (192.168.1.10:8123). Entries are matched
+against the addresses the host RESOLVES to, never against the host name, so
+a name cannot be re-pointed to an unlisted internal address (rebinding).
+Invalid entries are ignored (never widened) and reported at startup.
+
 When SSRF_PROTECTION is off (default — webhooks to a local Home Assistant
 are a common, legitimate use), connections behave exactly like the standard
 library's, except that webhook redirects are still not followed.
@@ -55,6 +62,71 @@ def is_public_ip(ip) -> bool:
                 or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
 
 
+def _normalise(ip):
+    ip = ipaddress.ip_address(ip)
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip
+
+
+def parse_allowlist(raw: str) -> tuple[list, list]:
+    """Parse SSRF_ALLOW. Returns ([(network, port|None), ...], [invalid, ...]).
+
+    Accepted forms: 192.168.1.10, 192.168.1.0/24, 192.168.1.10:8123,
+    fd00::5, fd00::/64, [fd00::5]:993. Host names are rejected: the policy
+    applies to resolved addresses only.
+    """
+    entries, invalid = [], []
+    for item in raw.replace(",", " ").split():
+        addr, port = item, None
+        try:
+            if item.startswith("["):                       # [v6]:port
+                addr, _, rest = item[1:].partition("]")
+                if rest:
+                    if not rest.startswith(":"):
+                        raise ValueError(item)
+                    port = int(rest[1:])
+            elif item.count(":") == 1:                     # v4:port
+                addr, p = item.split(":")
+                port = int(p)
+            if port is not None and not 1 <= port <= 65535:
+                raise ValueError(item)
+            if port is not None and "/" in addr:
+                raise ValueError(item)                     # port only on a single address
+            net = ipaddress.ip_network(addr, strict=False)
+            if net.version == 6 and net.prefixlen == 128 and net.network_address.ipv4_mapped:
+                net = ipaddress.ip_network(net.network_address.ipv4_mapped)
+            entries.append((net, port))
+        except ValueError:
+            invalid.append(item)
+    return entries, invalid
+
+
+_allow_cache: tuple = ("", [], [])
+
+
+def _allowlist() -> list:
+    """Parsed SSRF_ALLOW entries (cached per raw value; read at call time)."""
+    global _allow_cache
+    raw = _config.SSRF_ALLOW or ""
+    if _allow_cache[0] != raw:
+        _allow_cache = (raw, *parse_allowlist(raw))
+    return _allow_cache[1]
+
+
+def is_allowed_exception(ip, port: int) -> bool:
+    """True if *ip*:*port* matches an SSRF_ALLOW entry."""
+    ip = _normalise(ip)
+    return any(ip.version == net.version and ip in net and (p is None or p == port)
+               for net, p in _allowlist())
+
+
+def allowlist_problems() -> list:
+    """Invalid SSRF_ALLOW entries (ignored), for a startup warning."""
+    _allowlist()
+    return list(_allow_cache[2])
+
+
 def _resolve(host: str, port: int) -> list:
     """All (family, type, proto, canonname, sockaddr) entries for host:port."""
     return socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -76,8 +148,10 @@ def _checked_addresses(host: str, port: int) -> list:
     if not infos:
         raise SSRFBlocked(f"cannot resolve {host!r}")
     for *_, sockaddr in infos:
-        if not is_public_ip(sockaddr[0]):
-            raise SSRFBlocked(f"{host!r} resolves to non-public address {sockaddr[0]}")
+        ip = sockaddr[0]
+        if not is_public_ip(ip) and not is_allowed_exception(ip, port or 0):
+            raise SSRFBlocked(f"{host!r} resolves to non-public address {ip}"
+                              " (not listed in SSRF_ALLOW)")
     return infos
 
 

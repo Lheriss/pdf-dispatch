@@ -13,12 +13,29 @@ Internal dependencies:
 """
 
 import os
+import signal
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
 from dispatch.config import DATA_DIR, POST_PROCESS_SCRIPT, POST_PROCESS_TIMEOUT, log
 from dispatch.state import log_event
+
+
+# pdf-dispatch's own secrets, never passed to the post-processing script.
+_HOOK_HIDDEN_ENV = frozenset({"EMAIL_SECRET", "API_KEY", "APP_PASSWORD"})
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the hook's whole process group, then reap the script."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
+    try:
+        proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass   # pipes held open by a process outside the group: give up
 
 
 def _run_post_process_hook(
@@ -51,7 +68,12 @@ def _run_post_process_hook(
     The script must be executable (`chmod +x`).  If it exits with a non-zero
     code the event is logged as a warning but processing is unaffected.
     A script that takes longer than POST_PROCESS_TIMEOUT seconds is killed
-    and a warning is logged.
+    together with every process it started (it runs in its own process
+    group), and a warning is logged.
+
+    The script inherits the container environment EXCEPT pdf-dispatch's own
+    secrets (_HOOK_HIDDEN_ENV: EMAIL_SECRET, API_KEY, APP_PASSWORD), so it
+    can still read variables you add for it (e.g. a notification token).
     """
     if not POST_PROCESS_SCRIPT:
         return
@@ -65,7 +87,7 @@ def _run_post_process_hook(
         return
 
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if k not in _HOOK_HIDDEN_ENV},
         "PDF_DISPATCH_SOURCE":     source_file,
         "PDF_DISPATCH_STATUS":     status,
         "PDF_DISPATCH_TRIGGERS":   ",".join(triggers or []),
@@ -77,26 +99,33 @@ def _run_post_process_hook(
     }
 
     try:
-        result = subprocess.run(
+        # Own session / process group: on timeout the whole group is killed,
+        # including background children the script may have started.
+        proc = subprocess.Popen(
             [str(script_path)],
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=POST_PROCESS_TIMEOUT,
+            start_new_session=True,
         )
-        for line in result.stdout.splitlines():
+        try:
+            stdout, stderr = proc.communicate(timeout=POST_PROCESS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc)
+            log_event("warning",
+                      f"Post-process hook timed out after {POST_PROCESS_TIMEOUT}s",
+                      source_file)
+            return
+        for line in stdout.splitlines():
             if line.strip():
                 log_event("info", f"[hook] {line.strip()}", source_file, verbose=True)
-        for line in result.stderr.splitlines():
+        for line in stderr.splitlines():
             if line.strip():
                 log_event("warning", f"[hook] {line.strip()}", source_file, verbose=True)
-        if result.returncode != 0:
+        if proc.returncode != 0:
             log_event("warning",
-                      f"Post-process hook exited with code {result.returncode}",
+                      f"Post-process hook exited with code {proc.returncode}",
                       source_file)
-    except subprocess.TimeoutExpired:
-        log_event("warning",
-                  f"Post-process hook timed out after {POST_PROCESS_TIMEOUT}s",
-                  source_file)
     except Exception as exc:
         log_event("warning", f"Post-process hook error: {exc}", source_file)

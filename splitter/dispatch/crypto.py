@@ -13,10 +13,15 @@ Why a derived key rather than Fernet directly?
     expected format.
 
 Why cache (_EMAIL_SECRET_KEY)?
-    Without a cache, every encrypt/decrypt call re-reads the environment,
-    re-logs the info message, and — if EMAIL_SECRET is absent — generates
-    a different ephemeral key each time, making subsequent decryption
-    impossible (historical bug pre-v1.10, fixed in v1.11).
+    The key is derived once per process; every encrypt/decrypt reuses it.
+
+No EMAIL_SECRET: fail-closed (since v1.8.2)
+    Earlier versions generated a random key at each start and wrote it to
+    the log. Stored IMAP passwords then became unreadable after the next
+    restart, and the key leaked to anyone reading the log. Now no key is
+    generated: storing a password raises EmailSecretMissing (the API turns
+    it into an explicit error), reading one raises PasswordUnreadable, and
+    the key itself is never logged.
 """
 
 import base64
@@ -31,12 +36,39 @@ log = logging.getLogger("pdf-dispatch.crypto")
 _EMAIL_SECRET_KEY: Optional[bytes] = None
 
 
+class EmailSecretMissing(RuntimeError):
+    """EMAIL_SECRET is not set: IMAP passwords can be neither stored nor read."""
+
+
+class PasswordUnreadable(RuntimeError):
+    """A stored password cannot be decrypted (missing or different EMAIL_SECRET,
+    corrupted value). The message says which, for the activity log."""
+
+
+EMAIL_SECRET_HELP = (
+    "EMAIL_SECRET is not set: IMAP passwords cannot be stored or read. "
+    "Generate a key with `openssl rand -hex 32`, set it as EMAIL_SECRET in the "
+    "container environment and restart."
+)
+
+
+def email_secret_configured() -> bool:
+    """True when EMAIL_SECRET is set (non-empty)."""
+    return bool(os.getenv("EMAIL_SECRET", ""))
+
+
+def warn_if_email_secret_missing() -> None:
+    """Log one startup warning when EMAIL_SECRET is absent (never a key)."""
+    if not email_secret_configured():
+        log.warning(EMAIL_SECRET_HELP)
+
+
 def _get_email_secret() -> bytes:
     """Return the Fernet key (32-byte urlsafe-base64) derived from EMAIL_SECRET.
 
-    Computed once and cached in _EMAIL_SECRET_KEY.
-    If EMAIL_SECRET is not set, a random ephemeral key is generated and
-    instructions for setting a persistent one are logged.
+    Computed once and cached in _EMAIL_SECRET_KEY. Raises EmailSecretMissing
+    when EMAIL_SECRET is not set — no ephemeral key is ever generated, and
+    no key material is ever written to the log.
     """
     global _EMAIL_SECRET_KEY
     if _EMAIL_SECRET_KEY is not None:
@@ -44,19 +76,8 @@ def _get_email_secret() -> bytes:
 
     secret = os.getenv("EMAIL_SECRET", "")
     if not secret:
-        import secrets as _sec
-        generated = _sec.token_hex(32)
-        log.warning("EMAIL_SECRET not set — generated key: " + generated)
-        log.warning(
-            "Add to docker-compose.yml or Portainer: EMAIL_SECRET=" + generated
-        )
-        secret = generated
-    else:
-        log.info(
-            "EMAIL_SECRET: key read from environment ("
-            + str(len(secret))
-            + " chars)"
-        )
+        raise EmailSecretMissing(EMAIL_SECRET_HELP)
+    log.info("EMAIL_SECRET: key read from environment (" + str(len(secret)) + " chars)")
 
     digest = hashlib.sha256(secret.encode("utf-8")).digest()
     _EMAIL_SECRET_KEY = base64.urlsafe_b64encode(digest)
@@ -73,22 +94,46 @@ def encrypt_password(plaintext: str) -> str:
     """Encrypt a password with Fernet (AES-128-CBC + HMAC-SHA256).
 
     Returns an ASCII string (base64-url-encoded Fernet token).
-    Returns "" if plaintext is empty.
+    Returns "" if plaintext is empty. Raises EmailSecretMissing when
+    EMAIL_SECRET is not set (the password is NOT stored).
     """
     if not plaintext:
         return ""
     return _get_fernet().encrypt(plaintext.encode("utf-8")).decode("ascii")
 
 
-def decrypt_password(enc: str) -> str:
-    """Decrypt a Fernet token.
+def decrypt_password_checked(enc: str) -> str:
+    """Decrypt a Fernet token, explaining any failure.
 
-    Returns "" on failure (EMAIL_SECRET missing/invalid, corrupted token,
-    empty input) without raising an exception.
+    Returns "" for an empty input (no password stored). Raises
+    PasswordUnreadable with a message suitable for the activity log when the
+    key is missing or does not match, or the value is corrupted.
     """
     if not enc:
         return ""
+    from cryptography.fernet import InvalidToken  # noqa: PLC0415
     try:
-        return _get_fernet().decrypt(enc.encode("ascii")).decode("utf-8")
-    except Exception:
+        fernet = _get_fernet()
+    except EmailSecretMissing as exc:
+        raise PasswordUnreadable(str(exc)) from None
+    try:
+        return fernet.decrypt(enc.encode("ascii")).decode("utf-8")
+    except (InvalidToken, ValueError, UnicodeError):
+        raise PasswordUnreadable(
+            "the stored IMAP password cannot be decrypted: EMAIL_SECRET is not "
+            "the key it was saved with (changed or lost), or the value is "
+            "corrupted. Set the original EMAIL_SECRET, or enter the password again."
+        ) from None
+
+
+def decrypt_password(enc: str) -> str:
+    """Decrypt a Fernet token; "" on any failure (never raises).
+
+    Kept for callers that only need a best-effort value. Code that acts on
+    the password should use decrypt_password_checked() to report why it is
+    unreadable instead of treating it as empty.
+    """
+    try:
+        return decrypt_password_checked(enc)
+    except PasswordUnreadable:
         return ""

@@ -101,6 +101,18 @@ def create_app() -> Flask:
     _ensure_api_key()
     # While no administrator account exists, log a one-time setup code.
     ensure_setup_token()
+    # Without EMAIL_SECRET, IMAP passwords can be neither stored nor read:
+    # say so once at startup (the key itself is never logged).
+    from dispatch.crypto import warn_if_email_secret_missing
+    warn_if_email_secret_missing()
+    # Invalid SSRF_ALLOW entries are ignored (never widened): report them.
+    from dispatch.config import log as _log
+    from dispatch.netguard import allowlist_problems
+    _bad_allow = allowlist_problems()
+    if _bad_allow:
+        _log.warning(
+            "SSRF_ALLOW: ignored invalid entries (use IP, CIDR or IP:port): %s",
+            ", ".join(_bad_allow))
 
     # ── Web-interface session cookie ──────────────────────────────────────
     # Signed with a persisted random secret (survives restarts, so users stay

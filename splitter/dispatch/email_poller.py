@@ -16,7 +16,7 @@ Contains:
 
 Internal dependencies:
   - dispatch.config    (get_config, update_config, log, DATA_DIR, MAX_UPLOAD_MB)
-  - dispatch.crypto    (decrypt_password)
+  - dispatch.crypto    (decrypt_password_checked)
   - dispatch.i18n      (t)
   - dispatch.state     (log_event, _email_triggers, _email_triggers_lock,
                         _store_file_override)
@@ -37,7 +37,7 @@ from pathlib import Path
 from dispatch.config import (
     DATA_DIR, INPUT_DIR, MAX_UPLOAD_MB, get_config, log, update_config,
 )
-from dispatch.crypto import decrypt_password
+from dispatch.crypto import PasswordUnreadable, decrypt_password_checked
 from dispatch.netguard import GuardedIMAP4, GuardedIMAP4_SSL, SSRFBlocked
 from dispatch.i18n import t
 from dispatch.state import (
@@ -315,7 +315,13 @@ def _imap_process(email_cfg: dict):
     host        = email_cfg.get("host", "")
     port        = int(email_cfg.get("port", 993))
     username    = email_cfg.get("username", "")
-    password    = decrypt_password(email_cfg.get("password_enc", ""))
+    try:
+        password = decrypt_password_checked(email_cfg.get("password_enc", ""))
+    except PasswordUnreadable as exc:
+        # Not "incomplete configuration": say why the password is unusable.
+        log_event("error", t("log.email_password_unreadable",
+                             name=email_cfg.get("name", "?"), reason=exc))
+        return
     folder      = email_cfg.get("folder", "INBOX")
     verify_ssl  = email_cfg.get("verify_ssl", True)
     use_ssl     = email_cfg.get("use_ssl", True)  # False = plain IMAP (no TLS)

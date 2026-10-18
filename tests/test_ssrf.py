@@ -411,10 +411,188 @@ class TestImap:
         events = []
         monkeypatch.setattr(email_poller, "log_event",
                             lambda lvl, msg, *a, **k: events.append((lvl, str(msg))))
-        monkeypatch.setattr(email_poller, "decrypt_password", lambda enc: "pw")
+        monkeypatch.setattr(email_poller, "decrypt_password_checked", lambda enc: "pw")
         monkeypatch.setattr(email_poller, "_proc_ids_load", lambda cid: ([], None))
         email_poller._imap_process({
             "id": "t1", "name": "lab", "host": "imap.internal.example",
             "port": 993, "username": "u", "password_enc": "x",
         })
         assert any(lvl == "error" and "SSRF blocked" in msg for lvl, msg in events)
+
+
+# ── SSRF_ALLOW: explicit exceptions to block mode ─────────────────────────────
+
+@pytest.fixture
+def allow(monkeypatch):
+    def set_(raw):
+        monkeypatch.setattr(_config, "SSRF_ALLOW", raw)
+    return set_
+
+
+class TestAllowlistParsing:
+    def test_valid_forms(self):
+        entries, invalid = netguard.parse_allowlist(
+            "192.168.1.10, 10.0.0.0/8 192.168.1.20:8123 fd00::5 fd00:1::/64 [fd00::6]:993")
+        assert invalid == []
+        assert [(str(n), p) for n, p in entries] == [
+            ("192.168.1.10/32", None), ("10.0.0.0/8", None), ("192.168.1.20/32", 8123),
+            ("fd00::5/128", None), ("fd00:1::/64", None), ("fd00::6/128", 993)]
+
+    @pytest.mark.parametrize("bad", [
+        "homeassistant.local", "ha.example.com:8123", "192.168.1.300",
+        "10.0.0.0/8:80", "192.168.1.10:0", "192.168.1.10:70000", "[fd00::5]x", "1.2.3.4:abc",
+    ])
+    def test_invalid_entries_ignored(self, bad):
+        entries, invalid = netguard.parse_allowlist(f"192.168.1.10 {bad}")
+        assert invalid == [bad]
+        assert len(entries) == 1                 # the valid entry is kept, nothing widened
+
+    def test_mapped_v6_entry_normalised(self):
+        (net, _), = netguard.parse_allowlist("::ffff:192.168.1.10")[0]
+        assert str(net) == "192.168.1.10/32"
+
+
+class TestAllowlistPolicy:
+    def test_listed_ip_allowed(self, protection, resolver, allow):
+        allow("192.168.1.10")
+        resolver({"ha.lan": ["192.168.1.10"]})
+        assert netguard.check_destination("ha.lan", 8123)[0]
+
+    def test_unlisted_private_still_refused(self, protection, resolver, allow):
+        allow("192.168.1.10")
+        resolver({"nas.lan": ["192.168.1.11"]})
+        ok, reason = netguard.check_destination("nas.lan", 5000)
+        assert not ok and "SSRF_ALLOW" in reason
+
+    def test_cidr(self, protection, resolver, allow):
+        allow("192.168.1.0/24")
+        resolver({"a.lan": ["192.168.1.77"], "b.lan": ["192.168.2.1"]})
+        assert netguard.check_destination("a.lan", 80)[0]
+        assert not netguard.check_destination("b.lan", 80)[0]
+
+    def test_port_restriction(self, protection, resolver, allow):
+        allow("192.168.1.10:8123")
+        resolver({"ha.lan": ["192.168.1.10"]})
+        assert netguard.check_destination("ha.lan", 8123)[0]
+        assert not netguard.check_destination("ha.lan", 5000)[0]   # other service on the same host
+
+    def test_every_address_must_pass(self, protection, resolver, allow):
+        allow("192.168.1.10")
+        resolver({"mixed.lan": ["192.168.1.10", "127.0.0.1"]})
+        assert not netguard.check_destination("mixed.lan", 80)[0]
+
+    def test_mapped_v6_answer_matches_v4_entry(self, protection, resolver, allow):
+        allow("192.168.1.10")
+        resolver({"m.lan": ["::ffff:192.168.1.10"]})
+        assert netguard.check_destination("m.lan", 80)[0]
+
+    def test_ipv6_entry(self, protection, resolver, allow):
+        allow("[fd00::5]:993")
+        resolver({"mail.lan": ["fd00::5"]})
+        assert netguard.check_destination("mail.lan", 993)[0]
+        assert not netguard.check_destination("mail.lan", 143)[0]
+
+    def test_hostname_entry_grants_nothing(self, protection, resolver, allow):
+        allow("ha.lan")
+        resolver({"ha.lan": ["192.168.1.10"]})
+        assert not netguard.check_destination("ha.lan", 8123)[0]
+
+    def test_rebinding_to_unlisted_address_refused(self, protection, resolver, allow):
+        allow("192.168.1.10")
+        resolver({"ha.lan": lambda n: ["192.168.1.10"] if n == 1 else ["192.168.1.1"]})
+        assert netguard.check_destination("ha.lan", 80)[0]
+        with pytest.raises(SSRFBlocked):
+            netguard.guarded_create_connection(("ha.lan", 80), 5)
+
+    def test_public_addresses_unaffected(self, protection, resolver, allow):
+        allow("192.168.1.10")
+        resolver({"hooks.example.com": ["93.184.216.34"]})
+        assert netguard.check_destination("hooks.example.com", 443)[0]
+
+    def test_problems_reported(self, allow):
+        allow("192.168.1.10, homeassistant.local")
+        assert netguard.allowlist_problems() == ["homeassistant.local"]
+
+
+class TestAllowlistCallers:
+    def test_webhook_reaches_listed_local_endpoint(self, protection, allow, redirect_lab):
+        # With 127.0.0.1 allowed on the redirector's port, the connection is
+        # made (the 302 proves it) — and the redirect is still not followed.
+        hook_url, _ = redirect_lab
+        port = int(hook_url.split(":")[2].split("/")[0])
+        allow(f"127.0.0.1:{port}")
+        req = urllib.request.Request(hook_url, data=b"{}", method="POST")
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            netguard.guarded_urlopen(req, timeout=5)
+        assert exc.value.code == 302
+        assert _Target.hits == []
+
+    def test_webhook_other_port_still_blocked(self, protection, allow, redirect_lab):
+        hook_url, _ = redirect_lab
+        allow("127.0.0.1:1")
+        req = urllib.request.Request(hook_url, data=b"{}", method="POST")
+        with pytest.raises(urllib.error.URLError) as exc:
+            netguard.guarded_urlopen(req, timeout=5)
+        assert isinstance(exc.value.reason, SSRFBlocked)
+
+    def test_imap_listed_server_connects(self, protection, allow):
+        srv = _FakeImapServer()
+        try:
+            allow(f"127.0.0.1:{srv.port}")
+            m = netguard.GuardedIMAP4("127.0.0.1", srv.port)
+            assert srv.accepted == 1
+            m.shutdown()
+        finally:
+            srv.close()
+
+    def test_runtime_exposes_allowlist(self, client, allow, monkeypatch):
+        from dispatch.routes import docs
+        monkeypatch.setattr(docs, "SSRF_ALLOW", "192.168.1.10:8123")
+        assert client.get("/api/runtime").get_json()["ssrf_allow"] == "192.168.1.10:8123"
+
+
+class TestAllowlistThroughRoutes:
+    """Through the real entry points, which run an early check before the
+    connection: a port-restricted entry must match there too."""
+
+    def test_url_host_port(self):
+        assert webhook._url_host_port("http://ha.lan:8123/api/webhook/x") == ("ha.lan", 8123)
+        assert webhook._url_host_port("https://hooks.example.com/x") == ("hooks.example.com", 443)
+        assert webhook._url_host_port("http://[fd00::5]/x") == ("fd00::5", 80)
+
+    def test_webhook_test_route_port_restricted_entry(self, client, protection, allow,
+                                                      redirect_lab):
+        hook_url, _ = redirect_lab
+        port = int(hook_url.split(":")[2].split("/")[0])
+        allow(f"127.0.0.1:{port}")
+        client.post("/api/config", json={"webhook_url": hook_url})
+        try:
+            body = client.post("/api/webhook/test").get_json()
+            assert body.get("code") == 302, body          # reached, redirect not followed
+            assert _Target.hits == []
+        finally:
+            client.post("/api/config", json={"webhook_url": ""})
+
+    def test_delivery_port_restricted_entry(self, protection, allow, monkeypatch, redirect_lab):
+        hook_url, _ = redirect_lab
+        port = int(hook_url.split(":")[2].split("/")[0])
+        allow(f"127.0.0.1:{port}")
+        events = []
+        monkeypatch.setattr(webhook, "log_event",
+                            lambda lvl, msg, *a, **k: events.append(str(msg)))
+        monkeypatch.setattr(webhook.time, "sleep", lambda s: None)
+        webhook._deliver_webhook(hook_url, {"event": "x"}, "", "f.pdf", attempts=1)
+        assert not any("SSRF blocked" in m for m in events), events
+        assert any("not followed" in m for m in events)
+
+    def test_email_test_route_port_restricted_entry(self, client, protection, allow):
+        srv = _FakeImapServer()
+        try:
+            allow(f"127.0.0.1:{srv.port}")
+            r = client.post("/api/email/test", json={
+                "host": "127.0.0.1", "port": srv.port, "username": "u", "password": "p",
+                "use_ssl": False}, headers={"X-Requested-With": "x"})
+            assert r.status_code != 400, r.get_json()      # not an SSRF refusal
+            assert srv.accepted == 1
+        finally:
+            srv.close()
