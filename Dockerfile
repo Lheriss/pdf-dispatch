@@ -4,7 +4,12 @@ LABEL org.opencontainers.image.title="pdf-dispatch"
 LABEL org.opencontainers.image.description="Self-hosted PDF splitting service — splits PDFs on barcode/QR code detection with web UI and REST API"
 LABEL org.opencontainers.image.source="https://github.com/Lheriss/pdf-dispatch"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade` applies Debian security fixes published after the
+# python:3.12-slim base image was built (e.g. zlib1g CVE-2026-76844 /
+# CVE-2026-85091, fixed in 1:1.3.dfsg+really1.3.1-1+deb13u1), so the Trivy
+# scan does not fail while waiting for a rebuilt base image.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     libzbar0 \
     poppler-utils \
     libgl1 \
